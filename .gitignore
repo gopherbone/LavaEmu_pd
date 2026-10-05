@@ -1,0 +1,7 @@
+build/
+games/
+Source/Bundled/
+Source/pdex.*
+*.pdx/
+__pycache__/
+.DS_Store
