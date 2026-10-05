@@ -23,22 +23,22 @@ GAMES = [
     # key, folder, title, Chinese title, programs [(file in build, name in bundle, label)], credit
     ("frog", "FrogMonopoly", "Frog Monopoly", "蛙蛙大富翁",
      [("Lava/FrogMonopoly.lav", "FrogMonopoly.lav", "")],
-     "蛙蛙大富翁 1.1.2 (c) 2004 Hao Xinli (Computer Frog, 电脑蛙蛙), DATE Soft Studio; "
+     "version 1.1.2, (c) 2004 Hao Xinli (Computer Frog), DATE Soft Studio; "
      "maps by the authors in its map list."),
     ("ace", "AceAttorney", "Phoenix Wright: Ace Attorney", "逆转裁判",
      [("LAVA/逆转裁判.lav", "AceAttorney.lav", "")],
-     "逆转裁判 (c) 2004 忍者Eric (Ninja Eric), JunctionSoft: a LAVA port of the first case of "
+     "(c) 2004 Ninja Eric, JunctionSoft: a LAVA port of the first case of "
      "Capcom's Ace Attorney (2001)."),
     ("newhero", "NewHeroesAltar", "New Heroes' Altar", "新英雄坛说",
      [("LAVA/Hero.lav", "Hero.lav", "")],
-     "新英雄坛说 (c) 2007 反侵略 (Fanqinlue), 避暑阁楼 (Summer Loft)."),
+     "public test final version, (c) 2007 Fanqinlue, Summer Loft."),
     ("shushan", "HeroesOfMountShu", "Heroes of Mount Shu", "蜀山群侠传",
      [("Lava/ShuHeroes.lav", "ShuHeroes.lav", ""),
       ("Lava/ShuRegister.lav", "ShuRegister.lav", "Register an account (first)")],
-     "蜀山群侠传 (c) 2006 Shi Zehuan (史泽寰), FlySoft (飞翔软件)."),
+     "(c) 2006 Shi Zehuan, FlySoft."),
     ("seal", "SkyLand2", "Sky & Land II: The Sealing Stone", "幕天席地2：封印之石",
      [("SkyLand2.lav", "SkyLand2.lav", "")],
-     "幕天席地2：封印之石 1.3 (c) 2007 LeeStorm, Molang Team (末浪小组); mini-games by Yoshinhwa."),
+     "version 1.3, (c) 2007 LeeStorm, Molang Team; mini-games by Yoshinhwa."),
 ]
 
 # The Chinese originals: key -> (folder in games/lava, [(program, label)], data files)
@@ -77,7 +77,7 @@ def bundle_english(wqx: str, out: str) -> None:
             fields.append(("program", f"{name}|{label}" if label else name))
         for n in sorted(os.listdir(os.path.join(src, "LavaData"))):
             shutil.copy(os.path.join(src, "LavaData", n), os.path.join(dst, "LavaData", n))
-        fields.append(("credit", credit + " English translation: wqx_tl."))
+        fields.append(("credit", credit + " English fan translation: wqx_tl."))
         write_txt(os.path.join(dst, "game.txt"), fields)
         print(f"{folder}: {', '.join(p[1] for p in programs)} + {len(os.listdir(os.path.join(dst, 'LavaData')))} data files")
 

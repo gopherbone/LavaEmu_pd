@@ -1,4 +1,4 @@
-"""ctypes binding of the C VM (build/liblava.dylib, `make host`) with state
+"""ctypes binding of the C VM (host/liblava.dylib, `make host`) with state
 transfer to and from lavaemu's LavaVM, for the lockstep test and tools."""
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ _lib = None
 def lib():
     global _lib
     if _lib is None:
-        path = os.path.join(ROOT, "build", "liblava.dylib")
+        path = os.path.join(ROOT, "host", "liblava.dylib")
         _lib = C.CDLL(path)
         L = _lib
         vp, u8p, i32p, i64p = C.c_void_p, C.POINTER(C.c_uint8), C.POINTER(C.c_int32), C.POINTER(C.c_int64)

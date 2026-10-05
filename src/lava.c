@@ -1792,3 +1792,7 @@ int lava_state_load(LavaVM* vm, const uint8_t* buf, uint32_t len) {
 void lava_run_until(LavaVM* vm, int64_t end_us) {
     if (!vm->ended) run_until(vm, end_us);
 }
+
+void lava_free_file(LavaVM* vm, int i) {
+    if (i >= 0 && i < vm->nfiles) delete_file(vm, i);
+}

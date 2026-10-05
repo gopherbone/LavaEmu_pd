@@ -5,7 +5,7 @@
 #   make simulator   Simulator only
 #   make run         build and open in the Simulator
 #   make games       copy the English games from ~/wqx_tl (WQX_TL=...) into games/
-#   make host        build/liblava.dylib, the VM for the host-side tests
+#   make host        host/liblava.dylib, the VM for the host-side tests
 #   make check       lockstep test against lavaemu (needs ~/wqx_tl) + state round trip
 #   make autotest    Simulator build that plays itself and writes screenshots
 
@@ -70,11 +70,11 @@ games:
 	python3 tools/bundle.py --wqx-tl $(WQX_TL) $(if $(ORIGINALS),--originals) games
 
 HOST_CC = $(if $(filter Darwin,$(shell uname -s)),xcrun cc,cc)
-build/liblava.dylib: src/lava.c src/lava.h tools/lavahost.c
-	@mkdir -p build
+host/liblava.dylib: src/lava.c src/lava.h tools/lavahost.c
+	@mkdir -p host
 	$(HOST_CC) -O2 -Wall -Wextra -Wno-unused-parameter -shared -fPIC -o $@ src/lava.c tools/lavahost.c
 
-host: build/liblava.dylib
+host: host/liblava.dylib
 
 check: host
 	python3 tests/test_states.py

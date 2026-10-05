@@ -1,4 +1,4 @@
-"""Summarise build/keys_<game>.json (from `tests/lockstep.py --keys`): which
+"""Summarise host/keys_<game>.json (from `tests/lockstep.py --keys`): which
 key codes each game compares a key it read against, or polls with CheckKey."""
 import json, os, sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -9,7 +9,7 @@ def name(v):
     if 33 <= v < 127: return repr(chr(v))
     return str(v)
 for g in sys.argv[1:] or ["frog", "ace", "newhero", "shushan", "seal"]:
-    p = os.path.join(ROOT, "build", f"keys_{g}.json")
+    p = os.path.join(ROOT, "host", f"keys_{g}.json")
     if not os.path.exists(p): continue
     rows = json.load(open(p))
     print(f"== {g}")

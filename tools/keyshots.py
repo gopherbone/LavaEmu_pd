@@ -1,6 +1,6 @@
 """What does each key do? From a mid-game state (reached with the game's own
 QA driver in ~/wqx_tl), press each candidate key and screenshot the result:
-build/keyshots/<game>.png, one tile per key, before/after.
+host/keyshots/<game>.png, one tile per key, before/after.
 
     python3 tools/keyshots.py frog|seal|shushan|newhero|ace
 """
@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 WQX = os.environ.get("WQX_TL", os.path.expanduser("~/wqx_tl"))
 sys.path.insert(0, WQX)
 os.chdir(WQX)
-OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "build", "keyshots")
+OUT = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "host", "keyshots")
 os.makedirs(OUT, exist_ok=True)
 
 

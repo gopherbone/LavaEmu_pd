@@ -15,7 +15,7 @@ be compared and is counted as "tainted" instead.
     python3 tests/lockstep.py [GAME ...] [--routes a,b] [--max-div N]
 
 Needs ~/wqx_tl (or WQX_TL=path) and `make host`. Exit status 1 on any divergence.
-Divergent frames are saved to build/lockstep/<game>-<n>.pkl for
+Divergent frames are saved to host/lockstep/<game>-<n>.pkl for
 tests/stepdiff.py, which finds the first instruction that differs.
 """
 from __future__ import annotations
@@ -38,7 +38,7 @@ os.chdir(WQX)
 
 from lavaemu import vm as lvm  # noqa: E402
 
-OUT = os.path.join(lavac.ROOT, "build", "lockstep")
+OUT = os.path.join(lavac.ROOT, "host", "lockstep")
 os.makedirs(OUT, exist_ok=True)
 
 twins: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
@@ -242,7 +242,7 @@ def main(argv):
         import json
         for g, d in S.keys.items():
             rows = sorted(([k, v, sorted(r)] for (k, v), r in d.items()), key=lambda x: (x[0], x[1]))
-            with open(os.path.join(lavac.ROOT, "build", f"keys_{g}.json"), "w") as f:
+            with open(os.path.join(lavac.ROOT, "host", f"keys_{g}.json"), "w") as f:
                 json.dump(rows, f)
     print(f"TOTAL frames {S.frames}  VMs {S.vms}  syncs {S.syncs}  tainted {S.tainted}  divergent {len(S.divs)}")
     return 1 if S.divs else 0

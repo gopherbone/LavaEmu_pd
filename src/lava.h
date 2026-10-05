@@ -138,6 +138,7 @@ void lava_reset(LavaVM* vm);
 // Adds (or replaces) a file in the virtual file system. `dirty` marks it as a save.
 int lava_add_file(LavaVM* vm, const char* name, const uint8_t* data, uint32_t len, int dirty);
 LavaFile* lava_find_file(LavaVM* vm, const char* name);
+void lava_free_file(LavaVM* vm, int index);
 
 // One 1/60 s frame of virtual time.
 void lava_run_frame(LavaVM* vm);

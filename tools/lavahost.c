@@ -1,6 +1,6 @@
 // Host build of the VM for tests and tools (tests/lockstep.py, tools/keyscan.py):
 // a flat C API over lava.c that Python drives with ctypes.
-//   cc -O2 -shared -fPIC -o build/liblava.dylib src/lava.c tools/lavahost.c
+//   cc -O2 -shared -fPIC -o host/liblava.dylib src/lava.c tools/lavahost.c
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
