@@ -115,7 +115,7 @@ def run_frames(self, n=1):
     for _ in range(n):
         cv = twins.get(self)
         if cv is None:
-            cv = lavac.CVM(self.code)
+            cv = lavac.CVM(self.code, us_per_op=getattr(self, "us_per_op", 4))
             if S.keys is not None:
                 cv.set_probe(True)
             twins[self] = cv
@@ -125,6 +125,8 @@ def run_frames(self, n=1):
             self._apply_pending()
         # copy anything changed outside a frame (pokes, restores, keys)
         lavac.sync_inputs(self, cv)
+        if cv.pace() != getattr(self, "us_per_op", 4):
+            cv.set_pace(self.us_per_op)
         sig = lavac.files_sig(self)
         check_files = sig != files_seen.get(self)
         if lavac.diff(self, cv, files=check_files):
@@ -191,37 +193,78 @@ def route_names(game):
     return sorted(n[:-5] for n in os.listdir(d) if n.endswith(".json"))
 
 
+GAMES = ["frog", "ace", "newhero", "shushan", "seal", "skyland", "mario", "fujia", "sanguo", "snowman", "warcraft",
+         "pokemon", "school", "jianghu", "worms"]
+
+
+# Routes that change the Python VM's own code (so the C VM can't follow them)
+KNOWN = {"worms err_lavax": "the route patches lavaemu's SetGraphMode to fail, to show the old-VM error"}
+
+
 def run_game(game, only=None):
+    """Yields (label, thunk) for each QA route of a game, driven by its own qa.py."""
     import importlib
-    import io
-    import contextlib
     qa = importlib.import_module(f"{game}.qa")
-    qa.QA = scratch(game)
+    for var in ("QA", "QA_DIR"):
+        if hasattr(qa, var):
+            setattr(qa, var, scratch(game))
+    if hasattr(qa, "SEEN"):
+        qa.SEEN = os.path.join(scratch(game), "seen.json")
     if game == "ace":
         names = only or list(qa.ROUTES)
         out = qa.build.build("en", out_dir=None, quiet=True)
         for n in names:
             for english in (True, False):
-                S.label = f"{game} {n} {'en' if english else 'zh'}"
-                yield S.label, (lambda n=n, english=english: qa.run_route(n, english, False, out if english else None))
+                yield f"{game} {n} {'en' if english else 'zh'}", \
+                    (lambda n=n, english=english: qa.run_route(n, english, False, out if english else None))
     elif game == "newhero":
         for n in only or route_names(game):
-            S.label = f"{game} {n}"
-            yield S.label, (lambda n=n: qa.routes([n]))
+            yield f"{game} {n}", (lambda n=n: qa.routes([n]))
+    elif game == "mario":
+        from mario import build as mb, game as mg
+        for b in ("other", "emu"):
+            codes = {"zh": mg.load(b), "en": mb.build_all([b])[b]}
+            for n in only or route_names(game):
+                yield f"{game} {n} {b}", (lambda n=n, b=b, codes=codes: qa.run_route(n, b, codes))
+    elif game == "snowman":
+        from snowman import build as sb, game as sg
+        codes = {"zh": sg.load(), "en": sb.build()}
+        for n in only or route_names(game):
+            yield f"{game} {n}", (lambda n=n: qa.run_route(n, codes, 4, "pc"))
+    elif game == "worms":
+        from worms import build as wb, game as wg
+        codes = {"zh": wg.load(), "en": wb.build()}
+        for n in only or route_names(game):
+            yield f"{game} {n}", (lambda n=n: qa.run_route(n, codes))
+    elif game == "sanguo":
+        for n in only or route_names(game):
+            yield f"{game} {n}", (lambda n=n: qa.route(n))
+    elif game == "school":
+        from school import routes as sr
+        for mode in ("zh", "en"):
+            yield f"{game} tour {mode}", (lambda mode=mode: sr.tour(qa.Run(mode=mode)))
     else:
         for n in only or route_names(game):
-            S.label = f"{game} {n}"
-            yield S.label, (lambda n=n: qa.run_route(n))
+            yield f"{game} {n}", (lambda n=n: qa.run_route(n))
 
 
 def main(argv):
-    games = [a for a in argv if not a.startswith("--") and a in ("frog", "ace", "newhero", "shushan", "seal")]
+    games = [a for a in argv if not a.startswith("--") and a in GAMES]
     only = None
     if "--routes" in argv:
         only = argv[argv.index("--routes") + 1].split(",")
     if "--max-div" in argv:
         S.max_div = int(argv[argv.index("--max-div") + 1])
-    games = games or ["frog", "ace", "newhero", "shushan", "seal"]
+    games = games or GAMES
+    if "--pace" in argv:
+        # every VM at one pace (us per op), e.g. the shipped 27 for games whose QA ran at 4
+        force = int(argv[argv.index("--pace") + 1])
+        orig_init = lvm.LavaVM.__init__
+
+        def init(self, *a, **kw):
+            kw["us_per_op"] = force
+            orig_init(self, *a, **kw)
+        lvm.LavaVM.__init__ = init
     if "--keys" in argv:
         S.keys = {}
     if "--timing" in argv:
@@ -243,6 +286,11 @@ def main(argv):
                 err = f" (route error: {type(e).__name__}: {e})"
             print(f"{label:34s} frames {S.frames - f0:7d}  syncs {S.syncs - s0:5d}  tainted {S.tainted - t0:4d}  "
                   f"divergent {len(S.divs) - d0:3d}  {time.time() - t:6.1f}s{err}", flush=True)
+            for lab, fr, d in S.divs[d0:d0 + 2]:
+                print(f"    frame {fr}: {'; '.join(d)[:300]}", flush=True)
+            if (label in KNOWN) and len(S.divs) > d0:
+                print(f"    (expected: {KNOWN[label]})")
+                del S.divs[d0:]
             total_fail += len(S.divs) - d0
     if S.timing is not None:
         # host time of the C VM per frame; device estimate x175 (bbk_playdate's fast core:

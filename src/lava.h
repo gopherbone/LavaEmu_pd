@@ -74,7 +74,19 @@ typedef struct {
     void (*file_deleted)(void* ud, const char* name);
     // GetTime: year, month, day, hour, minute, second, weekday. NULL = lavaemu's fixed date.
     void (*get_time)(void* ud, int out[7]);
+    // After Refresh (classic screen): the frontend's flicker-grey blending samples here.
+    void (*on_refresh)(void* ud, const uint8_t* lcd);
 } LavaHost;
+
+// LavaX's pixel screen: one byte a pixel, `w` x `h`, outside LAVA RAM.
+// Mode 1: 0/1; mode 4: 0 (white) .. 15 (black); mode 8: palette indices.
+typedef struct LavaPx {
+    uint16_t w, h;
+    uint8_t mode, bg, fg, has_pal;
+    uint8_t* lcd;
+    uint8_t* buf;
+    uint8_t pal[256][3];
+} LavaPx;
 
 typedef struct LavaVM {
     // hot state first
@@ -90,6 +102,13 @@ typedef struct LavaVM {
     uint8_t ended, waiting, error;
     uint32_t seed;
     uint32_t fe_max;
+    uint32_t us_per_op;         // virtual microseconds an instruction costs (lavaemu's default 4)
+
+    // LavaX: header (byte 8 flags, screen size) and the pixel screen (NULL: the classic screen in RAM)
+    uint8_t hdr_flags, hdr_mode, lavax;
+    uint16_t hdr_w, hdr_h;
+    LavaPx* px;
+    int32_t brightness, line;
 
     // input
     uint8_t held[128];
@@ -143,6 +162,11 @@ void lava_free_file(LavaVM* vm, int index);
 // One 1/60 s frame of virtual time.
 void lava_run_frame(LavaVM* vm);
 void lava_run_until(LavaVM* vm, int64_t end_us);
+// A game's pace: virtual microseconds an instruction (4 = lavaemu's default,
+// a fast PC emulator; 27 an NC3000, 19 a TC800, 57 an NC2600, 75 an NC1020).
+void lava_set_pace(LavaVM* vm, uint32_t us_per_op);
+// LeeSoft's default 256-colour palette (R, G, B)
+void lavax_default_palette(uint8_t pal[256][3]);
 
 void lava_key_down(LavaVM* vm, int code);
 // keep_latch: a released key stays latched until the program reads it (the

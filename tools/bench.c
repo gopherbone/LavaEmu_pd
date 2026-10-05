@@ -33,6 +33,17 @@ double lava_prof_now(void) {
 }
 #endif
 
+static int cmpd(const void* a, const void* b) {
+    double x = *(const double*)a, y = *(const double*)b;
+    return x < y ? -1 : x > y;
+}
+static double p99(double* t, int n) {
+    static double c[3600];
+    memcpy(c, t, sizeof(double) * n);
+    qsort(c, n, sizeof c[0], cmpd);
+    return c[n * 99 / 100];
+}
+
 static double now(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
@@ -55,6 +66,7 @@ int main(int argc, char** argv) {
     uint8_t* code = slurp(p, &len);
     static LavaVM vm;
     if (!code || !lava_init(&vm, code, len, &fonts)) return 1;
+    if (argc > 3) lava_set_pace(&vm, (uint32_t)atoi(argv[3]));
     snprintf(p, sizeof p, "%s/LavaData", argv[1]);
     DIR* d = opendir(p);
     struct dirent* e;
@@ -77,6 +89,8 @@ int main(int argc, char** argv) {
         }
         return 0;
     }
+    static double times[3600];
+    double worst_frame = 0;
     double total = 0, worst_t = 0;
     uint64_t worst_ops = 0, ops_total = 0, busy_ops = 0;
     double busy_t = 0;
@@ -89,14 +103,16 @@ int main(int argc, char** argv) {
         double dt = now() - t0;
         uint64_t n = vm.ops - o;
         total += dt;
+        times[f] = dt;
+        if (dt > worst_frame) worst_frame = dt;
         ops_total += n;
-        if (n > 4000) busy_ops += n, busy_t += dt;
+        if (n > 600) busy_ops += n, busy_t += dt;
         if (n > worst_ops || (n == worst_ops && dt > worst_t)) worst_ops = n, worst_t = dt;
         if (getenv("SLOW") && dt > atof(getenv("SLOW")) * 1e-6) printf("  frame %d: %.1f us, %llu ops\n", f, dt * 1e6, (unsigned long long)n);
     }
-    printf("%-34s %6.0f ops/frame avg, %5.1f us/frame avg; full-budget frames: %6.1f us (%4.2f ns/op)\n", argv[2],
-           ops_total / 3600.0, total * 1e6 / 3600, busy_ops ? busy_t * 1e6 / (busy_ops / 4166.0) : 0,
-           busy_ops ? busy_t * 1e9 / busy_ops : 0);
+    // the slowest 1% of frames
+    printf("%-22s pace %2d: %5.0f ops/frame avg, %5.1f us/frame avg, p99 %6.1f us, max %6.1f us\n", argv[2],
+           (int)vm.us_per_op, ops_total / 3600.0, total * 1e6 / 3600, p99(times, 3600) * 1e6, worst_frame * 1e6);
 #ifdef LAVA_PROFILE
     for (int i = 0x80; i < 0xCB; i++)
         if (lava_sys_time[i] > 1e-4)

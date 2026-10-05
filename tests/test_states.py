@@ -14,11 +14,13 @@ GAMES = os.path.join(lavac.ROOT, "games")
 def load(folder):
     d = os.path.join(GAMES, folder)
     txt = dict(l.split("=", 1) for l in open(os.path.join(d, "game.txt"), encoding="utf-8").read().splitlines() if "=" in l)
-    prog = txt["program"].split("|")[0]
+    prog = [l.split("=", 1)[1] for l in open(os.path.join(d, "game.txt"), encoding="utf-8").read().splitlines()
+            if l.startswith("program=")][-1].split("|")[0]
+    pace = int(txt.get("pace", 4))
     files = {}
     for n in os.listdir(os.path.join(d, "LavaData")):
         files["/LavaData/" + n] = open(os.path.join(d, "LavaData", n), "rb").read()
-    return open(os.path.join(d, prog), "rb").read(), files
+    return open(os.path.join(d, prog), "rb").read(), files, pace
 
 
 def script(n):
@@ -44,25 +46,25 @@ def run(vm, events, start, end, lcds=None):
 
 def main():
     ok = True
-    for folder in ("FrogMonopoly", "SkyLand2", "NewHeroesAltar", "AceAttorney"):
+    for folder in ("FrogMonopoly", "SkyLand2", "NewHeroesAltar", "AceAttorney", "Worms", "PocketMonsters", "MarioPipes"):
         if not os.path.isdir(os.path.join(GAMES, folder)):
             print(f"skip {folder} (make games)")
             continue
-        code, files = load(folder)
+        code, files, pace = load(folder)
         ev = script(60)
-        a = lavac.CVM(code, files)
+        a = lavac.CVM(code, files, pace)
         run(a, ev, 0, 900)
         st = a.state_save()
         la = []
         run(a, ev, 900, 1600, la)
-        b = lavac.CVM(code, files)
+        b = lavac.CVM(code, files, pace)
         if not b.state_load(st):
             print(f"{folder}: state didn't load")
             ok = False
             continue
         lb = []
         run(b, ev, 900, 1600, lb)
-        same = la == lb and a.mem() == b.mem() and a.regs()["pc"] == b.regs()["pc"]
+        same = la == lb and a.mem() == b.mem() and a.regs()["pc"] == b.regs()["pc"] and a.px() == b.px()
         print(f"{folder}: state {len(st)} bytes, replay after load {'matches' if same else 'DIFFERS'}")
         ok &= same
     return 0 if ok else 1

@@ -61,6 +61,15 @@ def lib():
         L.lh_state_load.argtypes = [vp, C.c_char_p, C.c_uint32]
         L.lh_ops.restype = C.c_uint64
         L.lh_ops.argtypes = [vp]
+        L.lh_set_pace.argtypes = [vp, C.c_int]
+        L.lh_pace.argtypes = [vp]
+        L.lh_px_info.argtypes = [vp, i32p]
+        L.lh_px_plane.restype = u8p
+        L.lh_px_plane.argtypes = [vp, C.c_int]
+        L.lh_px_pal.restype = u8p
+        L.lh_px_pal.argtypes = [vp]
+        L.lh_px_set.argtypes = [vp, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_int, C.c_char_p,
+                                C.c_char_p, C.c_char_p]
     return _lib
 
 
@@ -78,7 +87,7 @@ def _enc(name: str) -> bytes:
 
 
 class CVM:
-    def __init__(self, code: bytes, files: dict | None = None):
+    def __init__(self, code: bytes, files: dict | None = None, us_per_op: int = 4):
         L = lib()
         self.code = bytes(code)
         self.h = L.lh_new(self.code, len(self.code), FONTS.encode())
@@ -90,6 +99,33 @@ class CVM:
         self._held = L.lh_held(self.h)
         for k, v in (files or {}).items():
             self.add_file(k, v)
+        self.set_pace(us_per_op)
+
+    def set_pace(self, upo: int) -> None:
+        self.L.lh_set_pace(self.h, int(upo))
+
+    def pace(self) -> int:
+        return self.L.lh_pace(self.h)
+
+    def px(self):
+        """None, or dict(w, h, mode, bg, fg, has_pal, lcd, buf)."""
+        info = (C.c_int32 * 6)()
+        if not self.L.lh_px_info(self.h, info):
+            return None
+        w, h = info[0], info[1]
+        return dict(w=w, h=h, mode=info[2], bg=info[3], fg=info[4], has_pal=info[5],
+                    lcd=C.string_at(self.L.lh_px_plane(self.h, 1), w * h),
+                    buf=C.string_at(self.L.lh_px_plane(self.h, 0), w * h))
+
+    def set_px(self, px) -> None:
+        if px is None:
+            self.L.lh_px_set(self.h, 0, 0, 0, 0, 0, 0, 0, None, None, None)
+            return
+        pal = None
+        if px.pal:
+            pal = b"".join(bytes(c) for c in px.pal) + bytes(256 * 3 - 3 * len(px.pal))
+        self.L.lh_px_set(self.h, 1, px.w, px.h, px.mode, px.bg, px.fg, 1 if px.pal else 0, bytes(px.lcd),
+                         bytes(px.buf), pal)
 
     def __del__(self):
         try:
@@ -256,6 +292,8 @@ def full_sync(vm, cv: CVM, files: bool = True) -> None:
     cv.set_handles(vm.fp)
     cv.set_dirs(vm.dirs)
     cv.set_cwd(vm.cwd)
+    cv.set_px(getattr(vm, "px", None))
+    cv.set_pace(getattr(vm, "us_per_op", 4))
 
 
 def diff(vm, cv: CVM, files: bool = True) -> list[str]:
@@ -280,6 +318,19 @@ def diff(vm, cv: CVM, files: bool = True) -> list[str]:
         out.append("held")
     if vm.cwd != cv.cwd():
         out.append("cwd")
+    ppx = getattr(vm, "px", None)
+    cpx = cv.px()
+    if (ppx is None) != (cpx is None):
+        out.append(f"px present py={ppx is not None} c={cpx is not None}")
+    elif ppx is not None:
+        for k in ("w", "h", "mode", "bg", "fg"):
+            if getattr(ppx, k) != cpx[k]:
+                out.append(f"px.{k} py={getattr(ppx, k)} c={cpx[k]}")
+        for k in ("lcd", "buf"):
+            a, b = bytes(getattr(ppx, k)), cpx[k]
+            if a != b:
+                idx = [i for i in range(min(len(a), len(b))) if a[i] != b[i]]
+                out.append(f"px.{k}({len(idx)} px, first {idx[:1]})")
     if set(vm.dirs) != cv.dirs():
         out.append(f"dirs py={sorted(vm.dirs)} c={sorted(cv.dirs())}")
     ch = cv.handles()

@@ -1,7 +1,7 @@
 // LAVA (GVmaker 1.0) VM. See lava.h. Every behaviour here mirrors
 // wqx_tl/lavaemu (vm.py, screen.py); comments point out the places where
 // that matters (masked vs unmasked addresses, Python integer semantics).
-#include "lava.h"
+#include "lava_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,14 +85,36 @@ int lava_init(LavaVM* vm, const uint8_t* code, uint32_t len, const LavaFonts* fo
     memset(vm, 0, sizeof *vm);
     if (len <= 16 || code[0] != 'L' || code[1] != 'A' || code[2] != 'V' || code[3] != 0x12) return 0;
     if (!rev8[1]) init_rev8();
+    uint8_t err = 0;
     vm->code = code;
     vm->code_len = len;
     if (fonts) vm->fonts = *fonts;
+    vm->us_per_op = LAVA_US_PER_OP;
+    // LavaX header: byte 8 flags (bits 6-5 graphics mode, bit 7/4 24/32-bit
+    // addresses), bytes 9-10 the screen size / 16
+    uint8_t f = code[8];
+    if (f & 0x90) {
+        snprintf(vm->errmsg, sizeof vm->errmsg, "%d-bit LavaX programs are not supported", f & 0x10 ? 32 : 24);
+        vm->error = vm->ended = 1;
+    }
+    int w = code[9] << 4, h = code[10] << 4;
+    vm->hdr_w = (uint16_t)(w < 160 ? 160 : w > 320 ? 320 : w);
+    vm->hdr_h = (uint16_t)(h < 80 ? 80 : h > 240 ? 240 : h);
+    vm->hdr_flags = f;
+    vm->hdr_mode = (f & 0x60) == 0x40 ? 4 : (f & 0x60) == 0x60 ? 8 : 1;
+    vm->lavax = f || vm->hdr_w != 160 || vm->hdr_h != 80;
     for (int i = 0; i < 3; i++) strcpy(vm->dirs[i], default_dirs[i]);
     vm->ndirs = 3;
+    err = vm->error;
     lava_reset(vm);
-    return 1;
+    if (err) {
+        vm->error = vm->ended = 1;
+        return 0;
+    }
+    return vm->px || !vm->lavax;
 }
+
+void lava_set_pace(LavaVM* vm, uint32_t us_per_op) { vm->us_per_op = us_per_op ? us_per_op : LAVA_US_PER_OP; }
 
 static void close_handles(LavaVM* vm) {
     for (int i = 0; i < 3; i++) {
@@ -122,10 +144,16 @@ void lava_reset(LavaVM* vm) {
     close_handles(vm);
     strcpy(vm->cwd, "/");
     vm->last_key = 0;
+    vm->brightness = 0;
+    vm->line = -1;
+    if (vm->px) lavax_px_free(vm->px);
+    vm->px = vm->lavax ? lavax_px_new(vm->hdr_w, vm->hdr_h, vm->hdr_mode) : NULL;
 }
 
 void lava_free(LavaVM* vm) {
     close_handles(vm);
+    if (vm->px) lavax_px_free(vm->px);
+    vm->px = NULL;
     for (int i = 0; i < vm->nfiles; i++) blob_unref(vm->files[i].blob);
     vm->nfiles = 0;
 }
@@ -228,7 +256,7 @@ static int min_held(LavaVM* vm) {
 // ---------------------------------------------------------------------------
 // Screen (screen.py). Rows are 20 bytes, MSB = leftmost pixel.
 
-static void fetch_glyph(LavaVM* vm, int code, int big, int* w, const uint8_t** data, int* n) {
+void lava_glyph(LavaVM* vm, int code, int big, int* w, const uint8_t** data, int* n) {
     static const uint8_t zeros[32];
     const uint8_t* buf;
     uint32_t len;
@@ -368,7 +396,7 @@ static void draw_text(LavaVM* vm, uint32_t base, int x, int y, const uint8_t* s,
         if (c >= 0x80 && i < n) c |= s[i++] << 8;
         int w, len;
         const uint8_t* g;
-        fetch_glyph(vm, c, big, &w, &g, &len);
+        lava_glyph(vm, c, big, &w, &g, &len);
         draw_data(vm, base, x, y, w, hgt, g, (uint32_t)len, 0, mode, mirror, inverse);
         x += w;
     }
@@ -562,10 +590,17 @@ static void xdraw(LavaVM* vm, int mode) {
 // ---------------------------------------------------------------------------
 // Text grid (printf / putchar)
 
-static void tdims(LavaVM* vm, int* cols, int* rows, int* rh) {
+void lava_tdims(LavaVM* vm, int* cols, int* rows, int* rh) {
+    LavaPx* p = vm->px;
+    if (p && (p->w != W || p->h != H)) {
+        if (vm->tbig) *cols = p->w / 8, *rows = p->h / 16, *rh = 16;
+        else *cols = ((p->w - 2) / 6) & ~1, *rows = (p->h - 1) / 13, *rh = 13;
+        return;
+    }
     if (vm->tbig) *cols = 20, *rows = 5, *rh = 16;
     else *cols = 26, *rows = 6, *rh = 13;
 }
+#define tdims lava_tdims
 
 static void tscroll(LavaVM* vm) {
     int cols, rows, rh;
@@ -612,6 +647,10 @@ static void tadds(LavaVM* vm, const uint8_t* d, int n) {
 }
 
 static void trender(LavaVM* vm, int which) {
+    if (vm->px) {
+        lavax_trender(vm, which);
+        return;
+    }
     int cols, rows, rh;
     tdims(vm, &cols, &rows, &rh);
     if ((which & 0xFF) == 0xFF) return;
@@ -653,7 +692,9 @@ static inline int32_t pymod(int32_t a, int32_t b) {
     return a % b;
 }
 
-static uint32_t cstr_len(LavaVM* vm, uint32_t a) {
+uint32_t lava_cstr_len(LavaVM* vm, uint32_t a);
+#define cstr_len lava_cstr_len
+uint32_t lava_cstr_len(LavaVM* vm, uint32_t a) {
     uint32_t e = a;
     while (e < MEM_END && vm->mem[e]) e++;
     return e - a;
@@ -669,6 +710,18 @@ static int format(LavaVM* vm, const int32_t* args, int nargs, uint8_t* out, int 
         int c = m[fa];
         if (c == 0) break;
         if (c == 0x25) {
+            int width = 0;
+            char flag = 0;
+            if (vm->px) {   // LavaX: %[-|0]<width>d, %f
+                fa++;
+                while (m[fa] == 0x30 || m[fa] == 0x2D) {
+                    if (!flag) flag = m[fa] == 0x30 ? '0' : '-';
+                    if (m[fa] == 0x2D) flag = '-';
+                    fa++;
+                }
+                while (m[fa] >= 0x30 && m[fa] <= 0x39) width = width * 10 + m[fa++] - 0x30;
+                fa--;
+            }
             int t = m[fa + 1];
             fa += 2;
             if (t == 0) break;
@@ -677,7 +730,32 @@ static int format(LavaVM* vm, const int32_t* args, int nargs, uint8_t* out, int 
                 int32_t v = ai < nargs ? args[ai] : 0;
                 ai++;
                 int k = snprintf(num, sizeof num, "%ld", (long)v);
+                int pad = width > k ? width - k : 0;
+                if (flag != '-')
+                    for (int i = 0; i < pad && n < cap; i++) out[n++] = flag == '0' ? '0' : ' ';
                 for (int i = 0; i < k && n < cap; i++) out[n++] = (uint8_t)num[i];
+                if (flag == '-')
+                    for (int i = 0; i < pad && n < cap; i++) out[n++] = ' ';
+            } else if (t == 0x66 && vm->px) {
+                int32_t v = ai < nargs ? args[ai] : 0;
+                ai++;
+                char num[48];
+                if ((((uint32_t)v >> 23) & 0xFF) == 0xFF) {
+                    strcpy(num, "error");
+                } else {
+                    float f;
+                    memcpy(&f, &v, 4);
+                    char raw[48];
+                    snprintf(raw, sizeof raw, "%g", (double)f);
+                    // Python's %g has a 2-digit exponent at least, as C; then "e+0" -> "e+"
+                    int j = 0;
+                    for (int i = 0; raw[i] && j < 47; i++) {
+                        num[j++] = raw[i];
+                        if ((raw[i] == '+' || raw[i] == '-') && i > 0 && raw[i - 1] == 'e' && raw[i + 1] == '0') i++;
+                    }
+                    num[j] = 0;
+                }
+                for (int i = 0; num[i] && n < cap; i++) out[n++] = (uint8_t)num[i];
             } else if (t == 0x63) {
                 if (n < cap) out[n++] = (uint8_t)(ai < nargs ? args[ai] & 0xFF : 0);
                 ai++;
@@ -699,7 +777,8 @@ static int format(LavaVM* vm, const int32_t* args, int nargs, uint8_t* out, int 
     return n;
 }
 
-static void path_of(LavaVM* vm, uint32_t a, char* out) {
+#define path_of lava_path_of
+void lava_path_of(LavaVM* vm, uint32_t a, char* out) {
     a &= 0xFFFF;
     uint32_t n = cstr_len(vm, a);
     int k = 0;
@@ -710,7 +789,8 @@ static void path_of(LavaVM* vm, uint32_t a, char* out) {
     out[k] = 0;
 }
 
-static int has_dir(LavaVM* vm, const char* d) {
+#define has_dir lava_has_dir
+int lava_has_dir(LavaVM* vm, const char* d) {
     for (int i = 0; i < vm->ndirs; i++)
         if (!strcmp(vm->dirs[i], d)) return 1;
     return 0;
@@ -902,6 +982,14 @@ static int sys_call(LavaVM* vm, int op) {
 #endif
     uint8_t* mem = vm->mem;
     vm->sys_since_key++;
+    if (op >= 0xCB) {
+        if (!lavax_sys(vm, op) && !vm->ended) {
+            vm->error = vm->ended = 1;
+            snprintf(vm->errmsg, sizeof vm->errmsg, "unknown syscall %#x at %#x", op, (unsigned)vm->pc - 1);
+        }
+        return 0;
+    }
+    if (vm->px && lavax_sys_px(vm, op)) return 0;
     switch (op) {
     case 0x8A: {    // TextOut(x, y, str, type)
         POPN(4);
@@ -923,7 +1011,10 @@ static int sys_call(LavaVM* vm, int op) {
                   (t & 0x20) != 0, (t & 0x08) != 0);
         break;
     }
-    case 0x89: memcpy(mem + LAVA_GRAPH, mem + LAVA_GBUF, LAVA_SCREEN_BYTES); break;
+    case 0x89:
+        memcpy(mem + LAVA_GRAPH, mem + LAVA_GBUF, LAVA_SCREEN_BYTES);
+        if (vm->host.on_refresh) vm->host.on_refresh(vm->host.ud, mem + LAVA_GRAPH);
+        break;
     case 0x8B:
     case 0x8C: {    // Block / Rectangle
         POPN(5);
@@ -1420,7 +1511,8 @@ static void run_until(LavaVM* vm, int64_t end_us) {
     int32_t last = vm->last;
     uint32_t fb = vm->fb, fe = vm->fe;
     int32_t* sp = vm->stack + vm->sp;
-    int64_t budget = (end_us - vm->us) / LAVA_US_PER_OP;
+    const int64_t upo = vm->us_per_op;
+    int64_t budget = (end_us - vm->us) / upo;
     if (end_us - vm->us < 0) budget = 0;
     int64_t n = 0;
     void (*probe)(LavaVM*, int, int) = vm->key_probe;
@@ -1445,7 +1537,10 @@ static void run_until(LavaVM* vm, int64_t end_us) {
         case 0x0C: last = (int32_t)(((OP16 + (uint32_t)POP()) & 0xFFFF) | 0x40000); PUSH(last); pc += 2; break;
         case 0x0D: {
             uint32_t e = pc;
-            while (e < vm->code_len && code[e]) e++;
+            // with an op 0x43 key the string and its terminator are stored XORed:
+            // it ends at the byte equal to the key
+            uint8_t term = vm->xorkey;
+            while (e < vm->code_len && code[e] != term) e++;
             uint32_t len = e + 1 - pc;
             uint32_t a = vm->strp;
             if (vm->xorkey) {
@@ -1621,20 +1716,27 @@ static void run_until(LavaVM* vm, int64_t end_us) {
         case 0x50: { int32_t v = (int16_t)OP16, a = POP(); if (probe && a == vm->last_key) probe(vm, 3, v); last = a >= v ? -1 : 0; PUSH(last); pc += 2; break; }
         case 0x51: { int32_t v = (int16_t)OP16, a = POP(); if (probe && a == vm->last_key) probe(vm, 3, v); last = a <= v ? -1 : 0; PUSH(last); pc += 2; break; }
         default:
-            if (op >= 0x80 && op <= 0xCA) {
+            if (op >= 0x52 && op <= 0x74) {
+                vm->sp = (int32_t)(sp - vm->stack);
+                pc = lavax_ext_op(vm, (int)op, pc, fb, &last);
+                sp = vm->stack + vm->sp;
+                if (vm->ended) goto out;
+                break;
+            }
+            if (op >= 0x80 && op <= 0xD6) {
                 vm->pc = pc;
                 vm->last = last;
                 vm->fb = fb;
                 vm->fe = fe;
                 vm->sp = (int32_t)(sp - vm->stack);
                 vm->ops += n;
-                vm->us += n * LAVA_US_PER_OP;
+                vm->us += n * upo;
                 n = 0;
                 int blocked = sys_call(vm, op);
                 pc = vm->pc;
                 last = vm->last;
                 sp = vm->stack + vm->sp;
-                budget = (end_us - vm->us) / LAVA_US_PER_OP;
+                budget = (end_us - vm->us) / upo;
                 if (end_us - vm->us < 0) budget = 0;
                 if (blocked) {
                     pc--;
@@ -1658,7 +1760,7 @@ out:
     vm->fe = fe;
     vm->sp = (int32_t)(sp - vm->stack);
     vm->ops += n;
-    vm->us += n * LAVA_US_PER_OP;
+    vm->us += n * upo;
 }
 
 void lava_run_frame(LavaVM* vm) {
@@ -1676,7 +1778,7 @@ void lava_run_frame(LavaVM* vm) {
 // Save states: a flat little-endian record. Files marked dirty (saves the
 // game wrote) are included; bundled data files are not.
 
-#define STATE_MAGIC 0x3256414C   // "LAV2"
+#define STATE_MAGIC 0x3356414C   // "LAV3"
 
 typedef struct {
     uint8_t* p;
@@ -1717,6 +1819,20 @@ static uint32_t state_write(const LavaVM* vm, uint8_t* buf, uint32_t cap) {
         put(&o, vm->files[i].name, LAVA_NAME_MAX);
         put32(&o, vm->files[i].blob->len);
         put(&o, vm->files[i].blob->data, vm->files[i].blob->len);
+    }
+    // the pixel screen
+    uint8_t pxf[8] = {vm->px != NULL, 0, 0, 0, 0, 0, 0, 0};
+    if (vm->px) {
+        const LavaPx* p = vm->px;
+        pxf[1] = p->mode, pxf[2] = p->bg, pxf[3] = p->fg, pxf[4] = p->has_pal;
+    }
+    put(&o, pxf, 8);
+    if (vm->px) {
+        const LavaPx* p = vm->px;
+        put32(&o, (uint32_t)p->w | (uint32_t)p->h << 16);
+        put(&o, p->lcd, (uint32_t)p->w * p->h);
+        put(&o, p->buf, (uint32_t)p->w * p->h);
+        if (p->has_pal) put(&o, p->pal, sizeof p->pal);
     }
     // open handles
     for (int i = 0; i < 3; i++) {
@@ -1813,6 +1929,21 @@ int lava_state_load(LavaVM* vm, const uint8_t* buf, uint32_t len) {
         lava_add_file(vm, name, in.p + in.pos, n, 1);
         if (vm->host.file_written) vm->host.file_written(vm->host.ud, name, in.p + in.pos, n);
         in.pos += n;
+    }
+    uint8_t pxf[8];
+    get(&in, pxf, 8);
+    if (vm->px) lavax_px_free(vm->px), vm->px = NULL;
+    if (pxf[0] && !in.bad) {
+        uint32_t wh = get32(&in);
+        int w = (int)(wh & 0xFFFF), h = (int)(wh >> 16);
+        if (w < 1 || w > 320 || h < 1 || h > 240 || in.pos + 2u * w * h > in.n) return 0;
+        LavaPx* p = lavax_px_new(w, h, pxf[1]);
+        if (!p) return 0;
+        p->bg = pxf[2], p->fg = pxf[3], p->has_pal = pxf[4];
+        get(&in, p->lcd, (uint32_t)w * h);
+        get(&in, p->buf, (uint32_t)w * h);
+        if (p->has_pal) get(&in, p->pal, sizeof p->pal);
+        vm->px = p;
     }
     for (int i = 0; i < 3 && !in.bad; i++) {
         uint8_t hf[4];

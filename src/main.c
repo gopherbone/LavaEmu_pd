@@ -16,6 +16,7 @@
 #include "pd_api.h"
 #include "lava.h"
 #include "profiles.h"
+#include "render.h"
 
 static PlaydateAPI* pd;
 static LCDFont* font;        // Asheville Sans 14 Bold
@@ -323,6 +324,9 @@ typedef struct {
     char label[64];         // second program's purpose ("Register an account (first)")
     char profile[16];
     char credit[300];
+    int order;              // position of the program in game.txt
+    int pace;               // us per op (0 = default 4)
+    int blend;              // 1: the game makes grey by flicker
 } Entry;
 
 static Entry entries[MAX_ENTRIES];
@@ -342,6 +346,8 @@ static void apply_game_txt(const char* key, const char* value, void* ud) {
     if (!strcmp(key, "title")) snprintf(g->e.title, sizeof g->e.title, "%s", value);
     else if (!strcmp(key, "profile")) snprintf(g->e.profile, sizeof g->e.profile, "%s", value);
     else if (!strcmp(key, "credit")) snprintf(g->e.credit, sizeof g->e.credit, "%s", value);
+    else if (!strcmp(key, "pace")) g->e.pace = atoi(value);
+    else if (!strcmp(key, "blend")) g->e.blend = atoi(value);
     else if (!strcmp(key, "title_gb")) {
         int n = 0;
         for (const char* p = value; p[0] && p[1] && n < (int)sizeof g->e.title_gb; p += 2) {
@@ -405,6 +411,7 @@ static void collect_folder(const char* name, void* ud) {
         snprintf(e->base, sizeof e->base, "%s", scan_base);
         snprintf(e->program, sizeof e->program, "%s", g.progs[i]);
         snprintf(e->label, sizeof e->label, "%s", g.labels[i]);
+        e->order = i;
         if (g.programs > 1 && !g.labels[i][0] && i > 0) snprintf(e->label, sizeof e->label, "%s", g.progs[i]);
     }
 }
@@ -419,7 +426,7 @@ static int compare_entries(const void* a, const void* b) {
     if (zx != zy) return zx - zy;
     int c = strcmp(x->title, y->title);
     if (c) return c;
-    return (y->label[0] != 0) - (x->label[0] != 0);   // a setup program (registration) first
+    return x->order - y->order;     // a game's programs in game.txt's order
 }
 
 static void scan_games(void) {
@@ -600,18 +607,23 @@ static void apply_deleted(void) {
     free_buf(t);
 }
 
+// Per game, in Config/<Folder>.txt: the state slot, a pace override and the grey mode.
+static int game_pace;       // us per op in use
+static int grey_mode;       // GREY_*: how flicker grey is shown
+enum { GREY_OFF, GREY_DITHER, GREY_MAJORITY, GREY_COUNT };
+
 static void apply_config(const char* key, const char* value, void* ud) {
     (void)ud;
-    if (!strcmp(key, "slot")) {
-        int v = atoi(value);
-        state_slot = v < 1 ? 1 : v > STATE_SLOTS ? STATE_SLOTS : v;
-    }
+    int v = atoi(value);
+    if (!strcmp(key, "slot")) state_slot = v < 1 ? 1 : v > STATE_SLOTS ? STATE_SLOTS : v;
+    else if (!strcmp(key, "pace") && v > 0 && v < 1000) game_pace = v;
+    else if (!strcmp(key, "grey") && v >= 0 && v < GREY_COUNT) grey_mode = v;
 }
 
 static void save_config(void) {
-    char path[200], buf[32];
+    char path[200], buf[64];
     snprintf(path, sizeof path, "Config/%s.txt", game.folder);
-    int n = snprintf(buf, sizeof buf, "slot=%d\n", state_slot);
+    int n = snprintf(buf, sizeof buf, "slot=%d\npace=%d\ngrey=%d\n", state_slot, game_pace, grey_mode);
     write_file(path, (uint8_t*)buf, n);
 }
 
@@ -695,15 +707,17 @@ static int dpad_code[4];          // key sent by each held direction
 static int a_code;
 static int chrome_dirty;          // border bands need redrawing
 
+static int a_key(void) { return profile->a_key.code ? profile->a_key.code : LK_ENTER; }
+
 #define PALETTE_EXTRA 2           // Enter (home) and Keyboard
 static int palette_count(void) { return profile->npalette + PALETTE_EXTRA; }
 static int palette_code(int i) {
-    if (i == 0) return LK_ENTER;
+    if (i == 0) return a_key();
     if (i <= profile->npalette) return profile->palette[i - 1].code;
     return -1;     // Keyboard
 }
 static const char* palette_label(int i) {
-    if (i == 0) return "Enter";
+    if (i == 0) return profile->a_key.code ? (profile->a_key.label ? profile->a_key.label : key_name(a_key())) : "Enter";
     if (i <= profile->npalette) {
         const char* l = profile->palette[i - 1].label;
         return l ? l : key_name(profile->palette[i - 1].code);
@@ -743,43 +757,76 @@ static void open_keyboard(int open) {
 
 // MARK: Rendering
 
-static uint8_t shown[LAVA_SCREEN_BYTES];
-static int shown_valid;
-static uint16_t dbl[256];   // a byte's 8 pixels doubled to 16, inverted (LCD 1 = black, frame 1 = white)
+// MARK: Screen rendering
 
-static void init_dbl(void) {
-    for (int b = 0; b < 256; b++) {
-        uint16_t v = 0;
-        for (int i = 0; i < 8; i++)
-            if (b & (0x80 >> i)) v |= 0xC000 >> (2 * i);
-        dbl[b] = (uint16_t)~v;
-    }
+static int shown_valid;                 // the frame holds tgt_shown (cleared when chrome is redrawn)
+static uint8_t tgt[240][40];            // the screen as Playdate rows (1 = white)
+static uint8_t tgt_shown[240][40];
+static int tgt_h = 160;                 // rows in use (160 for the 2x screens)
+
+// Flicker grey: the LCD at the last three Refreshes
+static uint8_t ring[3][LAVA_SCREEN_BYTES];
+static int ring_pos, ring_n;
+
+static void on_refresh(void* ud, const uint8_t* lcd) {
+    (void)ud;
+    if (grey_mode == GREY_OFF) return;
+    memcpy(ring[ring_pos], lcd, LAVA_SCREEN_BYTES);
+    ring_pos = (ring_pos + 1) % 3;
+    if (ring_n < 3) ring_n++;
 }
 
-static int lcd_y(void) { return keyboard_open ? LCD_Y_KEYBOARD : LCD_Y; }
+static int lcd_y(void) { return keyboard_open ? LCD_Y_KEYBOARD : (tgt_h > 160 ? (240 - tgt_h) / 2 : LCD_Y); }
 
-// Draws rows of the VM's LCD that changed since the last call.
-static void render_lcd(void) {
+static void compose(void) {
+    LavaPx* p = vm->px;
+    if (p && p->w == 160 && p->h == 80) {
+        static uint8_t pal[256][3];
+        const uint8_t (*pp)[3] = p->has_pal ? (const uint8_t (*)[3])p->pal : (const uint8_t (*)[3])pal;
+        if (p->mode == 8 && !p->has_pal && !pal[255][0]) lavax_default_palette(pal);
+        for (int y = 0; y < 80; y++) render_row_px2x(p->lcd + y * 160, p->mode, pp, tgt[2 * y], tgt[2 * y + 1]);
+        tgt_h = 160;
+        return;
+    }
+    if (p) {
+        static uint8_t pal[256][3];
+        if (p->mode == 8 && !p->has_pal && !pal[255][0]) lavax_default_palette(pal);
+        const uint8_t (*pp)[3] = p->has_pal ? (const uint8_t (*)[3])p->pal : (const uint8_t (*)[3])pal;
+        for (int y = 0; y < p->h; y++) render_row_px1x(p->lcd + y * p->w, p->w, y, p->mode, pp, tgt[y]);
+        tgt_h = p->h;
+        return;
+    }
     const uint8_t* lcd = lava_lcd(vm);
+    tgt_h = 160;
+    if (grey_mode != GREY_OFF && ring_n) {
+        // drawing straight on the LCD since the last Refresh counts as a frame too
+        int last = (ring_pos + 2) % 3;
+        if (memcmp(ring[last], lcd, LAVA_SCREEN_BYTES)) on_refresh(NULL, lcd);
+        const uint8_t* f[3];
+        for (int i = 0; i < 3; i++) f[i] = ring[(ring_pos + 2 - (i < ring_n ? i : ring_n - 1)) % 3];
+        for (int y = 0; y < 80; y++)
+            render_row_blend3(f[0] + y * 20, f[1] + y * 20, f[2] + y * 20, grey_mode == GREY_DITHER, tgt[2 * y],
+                              tgt[2 * y + 1]);
+        return;
+    }
+    for (int y = 0; y < 80; y++) render_row_1bpp(lcd + y * 20, tgt[2 * y], tgt[2 * y + 1]);
+}
+
+// Draws the rows of the screen that changed since the last call.
+static void render_lcd(void) {
+    compose();
     uint8_t* frame = pd->graphics->getFrame();
     int y0 = lcd_y();
     int first = -1, last = -1;
-    for (int y = 0; y < LAVA_H; y++) {
-        const uint8_t* src = lcd + y * LAVA_BPL;
-        if (shown_valid && !memcmp(src, shown + y * LAVA_BPL, LAVA_BPL)) continue;
-        memcpy(shown + y * LAVA_BPL, src, LAVA_BPL);
-        uint8_t* d = frame + (y0 + 2 * y) * LCD_ROWSIZE + LCD_X / 8;
-        for (int i = 0; i < LAVA_BPL; i++) {
-            uint16_t v = dbl[src[i]];
-            d[2 * i] = (uint8_t)(v >> 8);
-            d[2 * i + 1] = (uint8_t)v;
-        }
-        memcpy(d + LCD_ROWSIZE, d, LAVA_BPL * 2);
+    for (int y = 0; y < tgt_h; y++) {
+        if (shown_valid && !memcmp(tgt[y], tgt_shown[y], 40)) continue;
+        memcpy(tgt_shown[y], tgt[y], 40);
+        memcpy(frame + (y0 + y) * LCD_ROWSIZE + LCD_X / 8, tgt[y], 40);
         if (first < 0) first = y;
         last = y;
     }
     shown_valid = 1;
-    if (first >= 0) pd->graphics->markUpdatedRows(y0 + 2 * first, y0 + 2 * last + 1);
+    if (first >= 0) pd->graphics->markUpdatedRows(y0 + first, y0 + last);
 }
 
 static LCDPattern bezel_pattern = {
@@ -997,7 +1044,7 @@ static void start_game(const Entry* e) {
         show_message("Not a LAVA program", "The file isn't a GVmaker 1.0 (LAV\\x12) program.", SCREEN_PICKER);
         return;
     }
-    vm->host = (LavaHost){NULL, on_file_written, on_file_deleted, on_get_time};
+    vm->host = (LavaHost){NULL, on_file_written, on_file_deleted, on_get_time, on_refresh};
     snprintf(mount_root, sizeof mount_root, "%s/%s", e->base, e->folder);
     mount_dir("");
     saves_dir("");
@@ -1008,8 +1055,12 @@ static void start_game(const Entry* e) {
         profile = &auto_profile;
     }
     state_slot = 1;
+    game_pace = e->pace ? e->pace : LAVA_US_PER_OP;
+    grey_mode = e->blend ? GREY_DITHER : GREY_OFF;
+    ring_n = ring_pos = 0;
     snprintf(path, sizeof path, "Config/%s.txt", e->folder);
     read_kv(path, apply_config, NULL);
+    lava_set_pace(vm, (uint32_t)game_pace);
 
     release_all_keys();
     palette_open = !pd->system->isCrankDocked();
@@ -1042,6 +1093,7 @@ static void restart_game(void) {
 
 static const PDButtons dirs[4] = {kButtonUp, kButtonRight, kButtonDown, kButtonLeft};
 static const int arrow_codes[4] = {LK_UP, LK_RIGHT, LK_DOWN, LK_LEFT};
+static int dpad_key(int d) { return profile->dpad[d] ? profile->dpad[d] : arrow_codes[d]; }
 
 static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) {
     // Keyboard panel: D-pad/crank move, A presses, B closes.
@@ -1078,7 +1130,7 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
     }
     for (int d = 0; d < 4; d++) {
         if (pushed & dirs[d]) {
-            int code = arrow_codes[d];
+            int code = dpad_key(d);
             if (b_down && profile->chord[d].code) {
                 code = profile->chord[d].code;
                 b_chorded = 1;
@@ -1104,7 +1156,7 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
 
     // A: Enter, or the palette's selected key.
     if (pushed & kButtonA) {
-        int code = LK_ENTER;
+        int code = a_key();
         if (palette_open && palette_sel != 0) {
             code = palette_code(palette_sel);
             if (code < 0) {
@@ -1274,7 +1326,12 @@ static void game_update(void) {
 
 // MARK: Options
 
-enum { OPT_SAVE, OPT_LOAD, OPT_SLOT, OPT_BORDER, OPT_SPEED, OPT_PERF, OPT_KEYS, OPT_RESET, OPT_QUIT, OPT_COUNT };
+enum { OPT_SAVE, OPT_LOAD, OPT_SLOT, OPT_BORDER, OPT_SPEED, OPT_PACE, OPT_GREY, OPT_PERF, OPT_KEYS, OPT_RESET, OPT_QUIT,
+       OPT_COUNT };
+
+// Machine paces (us per op): lavaemu MACHINE_US_PER_OP, Worms' TC800 figure, and a PC emulator's
+static const int paces[] = {4, 19, 27, 57, 75};
+static const char* const pace_names[] = {"PC emulator", "TC800", "NC3000/TC1000", "NC2600", "NC1020"};
 static int opt_selected;
 
 static void option_label(int i, char* out, size_t cap) {
@@ -1286,6 +1343,18 @@ static void option_label(int i, char* out, size_t cap) {
     case OPT_BORDER: snprintf(out, cap, "Border\t%s", border_names[settings.border]); break;
     case OPT_SPEED: snprintf(out, cap, "Speed\t%dx", settings.speed); break;
     case OPT_PERF: snprintf(out, cap, "Show performance\t%s", settings.show_perf ? "On" : "Off"); break;
+    case OPT_PACE: {
+        const char* nm = "custom";
+        for (int k = 0; k < 5; k++)
+            if (paces[k] == game_pace) nm = pace_names[k];
+        snprintf(out, cap, "Machine pace\t%s (%d us)", nm, game_pace);
+        break;
+    }
+    case OPT_GREY: {
+        static const char* g[GREY_COUNT] = {"Off", "Dither", "Majority"};
+        snprintf(out, cap, "Flicker grey\t%s", g[grey_mode]);
+        break;
+    }
     case OPT_KEYS: snprintf(out, cap, "Keys for this game"); break;
     case OPT_RESET: snprintf(out, cap, "Reset game"); break;
     case OPT_QUIT: snprintf(out, cap, "Back to game list"); break;
@@ -1296,7 +1365,7 @@ static void options_draw(void) {
     pd->graphics->clear(kColorWhite);
     text(font, game.title, 12, 8);
     pd->graphics->drawLine(12, 30, 388, 30, 1, kColorBlack);
-    int row_h = 20, y0 = 38;
+    int row_h = 18, y0 = 36;
     for (int i = 0; i < OPT_COUNT; i++) {
         char label[96];
         option_label(i, label, sizeof label);
@@ -1367,6 +1436,20 @@ static void options_update(void) {
             settings.show_perf = !settings.show_perf;
             save_settings();
             break;
+        case OPT_PACE: {
+            int k = 0;
+            for (int i = 0; i < 5; i++)
+                if (paces[i] == game_pace) k = i;
+            game_pace = paces[(k + dir + 5) % 5];
+            lava_set_pace(vm, (uint32_t)game_pace);
+            save_config();
+            break;
+        }
+        case OPT_GREY:
+            grey_mode = (grey_mode + dir + GREY_COUNT) % GREY_COUNT;
+            ring_n = 0;
+            save_config();
+            break;
         }
         if (pushed & kButtonA) {
             switch (opt_selected) {
@@ -1400,7 +1483,15 @@ static void keys_draw(void) {
     pd->graphics->drawLine(12, y, 388, y, 1, kColorBlack);
     y += 6;
     text(small_font, "Buttons", 12, y);
-    text(small_font, "✛ arrows    Ⓐ Enter    Ⓑ (tap) Esc", cx, y);
+    if (profile->dpad[0] || profile->dpad[1] || profile->dpad[2] || profile->dpad[3] || profile->a_key.code) {
+        char a[24], dl[4][12];
+        for (int d = 0; d < 4; d++) snprintf(dl[d], sizeof dl[d], "%s", key_name(dpad_key(d)));
+        snprintf(a, sizeof a, "%s", profile->a_key.label ? profile->a_key.label : key_name(a_key()));
+        snprintf(line, sizeof line, "⬆️ %s  ➡️ %s  ⬇️ %s  ⬅️ %s   Ⓐ %s   Ⓑ Esc", dl[0], dl[1], dl[2], dl[3], a);
+        text(small_font, line, cx, y);
+    } else {
+        text(small_font, "✛ arrows    Ⓐ Enter    Ⓑ (tap) Esc", cx, y);
+    }
     y += 20;
     static const char* names[4] = {"⬆️", "➡️", "⬇️", "⬅️"};
     text(small_font, "Ⓑ held + ✛", 12, y);
@@ -1718,6 +1809,34 @@ static const AutotestGame autotest_games[] = {
                       "shot:shushan-map press:B ~2 shot:shushan-chords "
                       "press:RIGHT ~4 release:RIGHT ~2 release:B ~200 shot:shushan-items ESC ~200 "
                       "stats keys:shushan-keys ~10"},
+    {"SkyLand.lav", "~600 shot:skyland-title ENTER ~300 ENTER ~300 ENTER ~300 y ~150 a ~30 b ~30 c ~30 ENTER ~300 "
+                    "b ~300 ENTER ~300 ~600 shot:skyland-map F1 ~200 shot:skyland-f1 ESC ~200 undock ~4 crank:1 ~10 "
+                    "shot:skyland-palette dock stats keys:skyland-keys ~10"},
+    {"MarioPipes.lav", "~600 shot:mario-splash ENTER ~300 shot:mario-title ENTER ~400 shot:mario-newgame ENTER ~400 "
+                       "shot:mario-card ENTER ~400 press:RIGHT ~90 release:RIGHT press:A ~10 release:A ~60 "
+                       "shot:mario-play stats keys:mario-keys ~10"},
+    {"Millionaire3K.lav", "~600 shot:fujia-title ENTER ~900 ENTER ~300 shot:fujia-menu ENTER ~400 shot:fujia-2 "
+                          "ENTER ~400 ENTER ~400 shot:fujia-3 undock ~4 crank:1 ~10 shot:fujia-palette dock stats "
+                          "keys:fujia-keys ~10"},
+    {"ThreeKingdoms.lav", "~900 shot:sanguo-title ENTER ~400 shot:sanguo-2 ENTER ~400 ENTER ~400 shot:sanguo-3 "
+                          "ENTER ~400 shot:sanguo-4 stats keys:sanguo-keys ~10"},
+    {"Snowman.lav", "~300 shot:snowman-splash ENTER ~200 shot:snowman-title ENTER ~300 shot:snowman-2 ENTER ~300 "
+                    "shot:snowman-3 press:RIGHT ~60 release:RIGHT press:UP ~6 release:UP ~30 shot:snowman-play stats "
+                    "keys:snowman-keys ~10"},
+    {"WarCraft.lav", "~600 shot:warcraft-title ENTER ~300 shot:warcraft-race ENTER ~300 ENTER ~300 shot:warcraft-map "
+                     "ENTER ~900 shot:warcraft-loading ENTER ~600 shot:warcraft-start stats keys:warcraft-keys ~10"},
+    {"pokemon.lav", "~900 shot:pokemon-field press:A ~8 release:A ~300 shot:pokemon-menu press:A ~8 release:A ~400 "
+                    "press:A ~8 release:A ~400 shot:pokemon-dex "
+                    "grey:2 ~30 shot:pokemon-majority grey:0 ~30 shot:pokemon-raw grey:1 ~30 shot:pokemon-dither "
+                    "stats keys:pokemon-keys ~10"},
+    {"sch.lav", "~600 shot:school-title ENTER ~400 shot:school-2 ENTER ~400 shot:school-3 ENTER ~400 shot:school-4 "
+                "ENTER ~400 shot:school-5 stats keys:school-keys ~10"},
+    {"world.lav", "~600 shot:jianghu-title ENTER ~400 ENTER ~400 ENTER ~400 shot:jianghu-2 ENTER ~400 ENTER ~400 "
+                  "ENTER ~400 shot:jianghu-3 HELP ~300 shot:jianghu-menu stats keys:jianghu-keys ~10"},
+    {"Worms.lav", "~600 shot:worms-title DOWN ~60 shot:worms-map press:A ~8 release:A ~300 shot:worms-maps "
+                  "press:B ~4 release:B ~200 UP ~60 press:A ~8 release:A ~400 shot:worms-loading SPACE ~300 "
+                  "shot:worms-turn press:LEFT ~40 release:LEFT ~60 shot:worms-walk "
+                  "undock ~4 crank:2 ~10 shot:worms-palette dock stats keys:worms-keys ~10"},
     {"zh:FrogMonopoly-zh", "~240 ENTER ~60 ENTER ~60 shot:zh-frog ENTER ~60 ENTER ~90 ENTER ~60 shot:zh-frog-menu"},
     {"zh:SkyLand2-zh", "~300 ENTER ~120 shot:zh-seal-menu ENTER ~300 shot:zh-seal-intro"},
     {"zh:HeroesOfMountShu-zh", "~400 shot:zh-shushan ENTER ~200 shot:zh-shushan-2"},
@@ -1860,6 +1979,10 @@ static void autotest_update(void) {
         snprintf(dir, sizeof dir, "%s/LavaData", autotest_ls_prefix);
         autotest_ls_prefix = dir;
         pd->file->listfiles(dir, autotest_ls, NULL, 0);
+    } else if (!strncmp(tok, "grey:", 5)) {
+        grey_mode = atoi(tok + 5);
+        ring_n = 0;
+        shown_valid = 0;
     } else if (!strncmp(tok, "border:", 7)) {
         settings.border = atoi(tok + 7);
         needs_redraw = 1;
@@ -1943,7 +2066,7 @@ int eventHandler(PlaydateAPI* playdate, PDSystemEvent event, uint32_t arg) {
         const char* mk[] = {"Games", "Saves", "States", "Config"};
         for (size_t i = 0; i < sizeof mk / sizeof mk[0]; i++) pd->file->mkdir(mk[i]);
         read_kv("settings.txt", apply_setting, NULL);
-        init_dbl();
+        render_init();
         pd->display->setRefreshRate(REFRESH_RATE);
         pd->system->setUpdateCallback(update, NULL);
         break;

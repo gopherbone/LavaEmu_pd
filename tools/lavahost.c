@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../src/lava.h"
+#include "../src/lava_internal.h"
 
 static uint8_t* slurp(const char* path, uint32_t* len) {
     FILE* f = fopen(path, "rb");
@@ -185,3 +185,27 @@ int lh_state_load(Host* h, const uint8_t* buf, uint32_t len) { return lava_state
 // Benchmark helper: run n frames, return ops executed.
 uint64_t lh_ops(Host* h) { return h->vm.ops; }
 void lh_run_until(Host* h, int64_t end_us) { lava_run_until(&h->vm, end_us); }
+
+// Pace and the LavaX pixel screen
+void lh_set_pace(Host* h, int upo) { lava_set_pace(&h->vm, (uint32_t)upo); }
+int lh_pace(Host* h) { return (int)h->vm.us_per_op; }
+int lh_px_info(Host* h, int32_t* info) {
+    LavaPx* p = h->vm.px;
+    if (!p) return 0;
+    info[0] = p->w, info[1] = p->h, info[2] = p->mode, info[3] = p->bg, info[4] = p->fg, info[5] = p->has_pal;
+    return 1;
+}
+uint8_t* lh_px_plane(Host* h, int lcd) { return h->vm.px ? (lcd ? h->vm.px->lcd : h->vm.px->buf) : NULL; }
+uint8_t* lh_px_pal(Host* h) { return h->vm.px ? &h->vm.px->pal[0][0] : NULL; }
+void lh_px_set(Host* h, int present, int w, int hh, int mode, int bg, int fg, int has_pal, const uint8_t* lcd,
+               const uint8_t* buf, const uint8_t* pal) {
+    LavaVM* v = &h->vm;
+    if (v->px) lavax_px_free(v->px), v->px = NULL;
+    if (!present) return;
+    LavaPx* p = lavax_px_new(w, hh, mode);
+    p->bg = (uint8_t)bg, p->fg = (uint8_t)fg, p->has_pal = (uint8_t)has_pal;
+    memcpy(p->lcd, lcd, (size_t)w * hh);
+    memcpy(p->buf, buf, (size_t)w * hh);
+    if (has_pal && pal) memcpy(p->pal, pal, sizeof p->pal);
+    v->px = p;
+}
