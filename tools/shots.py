@@ -5,6 +5,9 @@ from PIL import Image
 SRC = os.path.expanduser("~/Developer/PlaydateSDK/Disk/Data/com.gopherbone.lavaemu/autotest")
 out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "host", "shots")
 os.makedirs(out, exist_ok=True)
+for n in os.listdir(out):
+    if n.endswith(".png"):
+        os.unlink(os.path.join(out, n))
 names = sorted(n for n in os.listdir(SRC) if n.endswith(".pbm"))
 ims = []
 for n in names:

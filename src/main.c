@@ -419,7 +419,7 @@ static int compare_entries(const void* a, const void* b) {
     if (zx != zy) return zx - zy;
     int c = strcmp(x->title, y->title);
     if (c) return c;
-    return (x->label[0] != 0) - (y->label[0] != 0);
+    return (y->label[0] != 0) - (x->label[0] != 0);   // a setup program (registration) first
 }
 
 static void scan_games(void) {
@@ -823,12 +823,15 @@ static void draw_top_band(void) {
     } else if (toast_frames > 0) {
         snprintf(t, sizeof t, "%s", toast_text);
     } else if (settings.show_perf) {
+        // VM time per 1/60 s frame (and its share of that 16.7 ms), ops per frame, draw time, fps;
+        // bench = average VM cost of frames 300-599 since the game started.
+        char vmt[24], bt[24] = "";
+        if (frame_cost_ms < 1.0f) snprintf(vmt, sizeof vmt, "%d us", (int)(frame_cost_ms * 1000.0f + 0.5f));
+        else snprintf(vmt, sizeof vmt, "%d.%d ms", (int)frame_cost_ms, (int)(frame_cost_ms * 10) % 10);
+        if (bench_result > 0) snprintf(bt, sizeof bt, "  bench %d us", (int)(bench_result * 1000.0f + 0.5f));
         int load = (int)(frame_cost_ms * 60.0f / 10.0f + 0.5f);
-        int n = snprintf(t, sizeof t, "VM %d.%02d ms/f (%d%%)  %d op/f  draw %d.%d ms  %dfps", (int)frame_cost_ms,
-                         (int)(frame_cost_ms * 100) % 100, load, (int)ops_per_frame, (int)render_ms,
-                         (int)(render_ms * 10) % 10, (int)(pd->display->getFPS() + 0.5f));
-        if (bench_result > 0)
-            snprintf(t + n, sizeof t - n, "  bench %d.%02d", (int)bench_result, (int)(bench_result * 100) % 100);
+        snprintf(t, sizeof t, "VM %s/f (%d%%)  %d op/f  draw %d us  %dfps%s", vmt, load, (int)ops_per_frame,
+                 (int)(render_ms * 1000.0f + 0.5f), (int)(pd->display->getFPS() + 0.5f), bt);
     }
     int dark = dark_border();
     if (settings.border == BORDER_DEVICE && !keyboard_open) dark = 0;
@@ -1662,6 +1665,12 @@ static void autotest_printf(const char* fmt, ...) {
 }
 
 static void autotest_shot(const char* name) {
+    if (vm) {
+        uint32_t h = 2166136261u;
+        for (int i = 0; i < LAVA_SCREEN_BYTES; i++) h = (h ^ lava_lcd(vm)[i]) * 16777619u;
+        autotest_printf("   shot %s: vm frame %d pc %05x lcd %08x shown_valid %d", name, (int)vm->frame, (unsigned)vm->pc,
+                        (unsigned)h, shown_valid);
+    }
     char path[96];
     snprintf(path, sizeof path, "autotest/%s.pbm", name);
     SDFile* f = pd->file->open(path, kFileWrite);
@@ -1695,15 +1704,28 @@ static const AutotestGame autotest_games[] = {
                          "press:B ~2 release:B ~60 shot:frog-esc stats keys:frog-keys ~10 s ~60 shot:frog-quicksave ENTER ~120 ls "
                          "savestate ESC ~60 restart ~300 ENTER ~60 ENTER ~60 ENTER ~60 shot:frog-restarted loadstate ~30 "
                          "shot:frog-loadstate r ~60 ENTER ~120 shot:frog-quickload"},
-    {"AceAttorney.lav", "~300 shot:ace-title ENTER ~120 ENTER ~120 ENTER ~120 ENTER ~120 shot:ace-intro undock ~4 "
-                        "crank:1 ~10 shot:ace-palette dock stats keys:ace-keys ~10"},
-    {"Hero.lav", "~400 shot:newhero-title ENTER ~200 shot:newhero-2 ENTER ~200 ENTER ~200 shot:newhero-3 stats keys:newhero-keys ~10"},
-    {"ShuRegister.lav", "~300 shot:shushan-register undock ~4 crank:-1 ~10 shot:shushan-palkb press:A ~2 "
-                        "release:A ~10 shot:shushan-keyboard kb:off dock stats keys:shushan-keys ~10"},
-    {"ShuHeroes.lav", "~400 shot:shushan-title ENTER ~200 shot:shushan-2 stats"},
-    {"SkyLand2.lav", "~300 shot:seal-title ENTER ~120 shot:seal-menu ENTER ~300 ENTER ~200 shot:seal-intro y ~60 "
-                     "undock ~4 crank:1 ~10 shot:seal-palette dock border:2 ~60 shot:seal-device border:1 perf:1 ~400 "
-                     "shot:seal-black-perf perf:0 border:0 ~10 stats opts:seal-options keys:seal-keys ~10"},
+    {"AceAttorney.lav", "~300 shot:ace-title ENTER ~240 ENTER ~240 ENTER ~240 ENTER ~240 ENTER ~240 ENTER ~240 "
+                        "shot:ace-intro ENTER ~240 ENTER ~240 ENTER ~240 shot:ace-court undock ~4 crank:1 ~10 "
+                        "shot:ace-palette dock stats keys:ace-keys ~10"},
+    {"Hero.lav", "~400 shot:newhero-title ENTER ~300 shot:newhero-2 ENTER ~400 ENTER ~400 ENTER ~400 shot:newhero-4 "
+                 "ENTER ~400 ENTER ~400 ENTER ~600 shot:newhero-hero ENTER ~600 ENTER ~600 "
+                 "shot:newhero-map ESC ~120 shot:newhero-status ESC ~60 stats keys:newhero-keys ~10"},
+    {"ShuRegister.lav", "~300 shot:shushan-register ENTER ~120 a ~20 b ~20 c ~20 undock ~4 crank:-1 ~10 "
+                        "shot:shushan-palkb press:A ~2 release:A ~10 shot:shushan-keyboard kb:off dock ENTER ~60 "
+                        "1 ~20 2 ~20 3 ~20 shot:shushan-typed ENTER ~120 y ~120 shot:shushan-registered stats ls"},
+    {"ShuHeroes.lav", "~400 shot:shushan-title ENTER ~300 a ~20 b ~20 c ~20 ENTER ~60 1 ~20 2 ~20 3 ~20 "
+                      "ENTER ~300 shot:shushan-login ENTER ~400 ENTER ~200 ENTER ~200 ENTER ~200 ENTER ~200 ENTER ~200 "
+                      "shot:shushan-map press:B ~2 shot:shushan-chords "
+                      "press:RIGHT ~4 release:RIGHT ~2 release:B ~200 shot:shushan-items ESC ~200 "
+                      "stats keys:shushan-keys ~10"},
+    {"zh:FrogMonopoly-zh", "~240 ENTER ~60 ENTER ~60 shot:zh-frog ENTER ~60 ENTER ~90 ENTER ~60 shot:zh-frog-menu"},
+    {"zh:SkyLand2-zh", "~300 ENTER ~120 shot:zh-seal-menu ENTER ~300 shot:zh-seal-intro"},
+    {"zh:HeroesOfMountShu-zh", "~400 shot:zh-shushan ENTER ~200 shot:zh-shushan-2"},
+    {"SkyLand2.lav", "~300 shot:seal-title ENTER ~120 shot:seal-menu ENTER ~300 shot:seal-intro ENTER ~300 ENTER ~600 "
+                     "shot:seal-prompt y ~90 a ~10 b ~10 c ~10 shot:seal-account ENTER ~60 shot:seal-class ENTER ~60 ENTER ~60 ENTER ~400 "
+                     "shot:seal-village F1 ~60 shot:seal-f1 ESC ~60 undock ~4 crank:1 ~10 shot:seal-palette dock "
+                     "border:2 ~60 shot:seal-device border:1 perf:1 ~400 shot:seal-black-perf perf:0 border:0 ~10 stats "
+                     "opts:seal-options keys:seal-keys ~10"},
 };
 
 static const char* autotest_ls_prefix;
@@ -1766,10 +1788,15 @@ static void autotest_update(void) {
                 autotest_done = 1;
                 return;
             }
-            if (strstr(entries[autotest_last_entry].folder, "-zh")) continue;
             autotest_index = -1;
-            for (unsigned i = 0; i < sizeof autotest_games / sizeof autotest_games[0]; i++)
-                if (!strcmp(autotest_games[i].program, entries[autotest_last_entry].program)) autotest_index = (int)i;
+            int zh = strstr(entries[autotest_last_entry].folder, "-zh") != NULL;
+            for (unsigned i = 0; i < sizeof autotest_games / sizeof autotest_games[0]; i++) {
+                const char* pn = autotest_games[i].program;
+                if (zh ? (!strncmp(pn, "zh:", 3) && !strcmp(pn + 3, entries[autotest_last_entry].folder) &&
+                          !entries[autotest_last_entry].label[0])
+                       : !strcmp(pn, entries[autotest_last_entry].program))
+                    autotest_index = (int)i;
+            }
             if (autotest_index >= 0) break;
         }
         picker_selected = autotest_last_entry;
@@ -1836,6 +1863,7 @@ static void autotest_update(void) {
     } else if (!strncmp(tok, "border:", 7)) {
         settings.border = atoi(tok + 7);
         needs_redraw = 1;
+
     } else if (!strncmp(tok, "perf:", 5)) {
         settings.show_perf = atoi(tok + 5);
         chrome_dirty = 1;
