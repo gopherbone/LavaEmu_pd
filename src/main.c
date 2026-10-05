@@ -812,7 +812,7 @@ static void draw_chrome(void) {
 static void draw_top_band(void) {
     char t[128] = "";
     if (b_down) {
-        static const char* arrows[4] = {"▲", "▶", "▼", "◀"};
+        static const char* arrows[4] = {"⬆️", "➡️", "⬇️", "⬅️"};
         int n = 0;
         for (int d = 0; d < 4; d++) {
             const ProfileKey* k = &profile->chord[d];
@@ -834,7 +834,8 @@ static void draw_top_band(void) {
     if (settings.border == BORDER_DEVICE && !keyboard_open) dark = 0;
     int y = keyboard_open ? -100 : 8;   // no top band while the keyboard is open
     if (y < 0) return;
-    pd->graphics->fillRect(LCD_X - 4, 4, 328, 22, settings.border == BORDER_DEVICE ? (LCDColor)bezel_pattern
+    int dev = settings.border == BORDER_DEVICE;
+    pd->graphics->fillRect(dev ? 18 : 0, dev ? 6 : 2, dev ? 364 : 400, dev ? 24 : 30, settings.border == BORDER_DEVICE ? (LCDColor)bezel_pattern
                                                                                     : (dark ? kColorBlack : kColorWhite));
     if (!t[0]) return;
     int w = text_w(small_font, t);
@@ -851,7 +852,8 @@ static void draw_top_band(void) {
 static void draw_palette(void) {
     int y = 207, h = 31;
     LCDColor bg = settings.border == BORDER_DEVICE ? (LCDColor)bezel_pattern : (dark_border() ? kColorBlack : kColorWhite);
-    pd->graphics->fillRect(0, y - 2, 400, 240 - (y - 2), bg);
+    if (settings.border == BORDER_DEVICE) pd->graphics->fillRect(18, y - 2, 364, 236 - (y - 2), bg);
+    else pd->graphics->fillRect(0, y - 2, 400, 240 - (y - 2), bg);
     if (!palette_open) {
         if (settings.border == BORDER_DEVICE) draw_chrome();
         return;
@@ -887,8 +889,8 @@ static void draw_palette(void) {
         if (palette_pressed == i && sel) pd->graphics->drawRoundRect(x - 2, y - 2, cw + 4, h + 4, 6, 2, kColorXOR);
     }
     // where the reel can go: little marks at the ends
-    if (palette_sel > 2) text(small_font, "◀", 4, y + 9);
-    if (palette_sel + 2 < n - 1) text(small_font, "▶", 384, y + 9);
+    if (palette_sel > 2) text(small_font, "⬅️", 2, y + 9);
+    if (palette_sel + 2 < n - 1) text(small_font, "➡️", 384, y + 9);
 }
 
 // Keyboard panel under the moved-up LCD.
@@ -1126,15 +1128,20 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
 }
 
 #ifdef LAVA_AUTOTEST
-static int autotest_crank_override = -1;   // 1 = palette forced open
+// Synthetic input for the autotest, fed through the same paths as the real thing.
+static int autotest_crank_override = -1;   // 0 docked, 1 undocked
+static PDButtons synth_pushed, synth_released, synth_cur;
+static float synth_crank;
 #endif
 
 static void handle_crank(void) {
-#ifdef LAVA_AUTOTEST
-    if (autotest_crank_override >= 0) return;
-#endif
     int docked = pd->system->isCrankDocked();
     float change = pd->system->getCrankChange();
+#ifdef LAVA_AUTOTEST
+    if (autotest_crank_override >= 0) docked = !autotest_crank_override;
+    change += synth_crank;
+    synth_crank = 0;
+#endif
     if (docked) {
         if (palette_open) {
             palette_open = 0;
@@ -1184,10 +1191,11 @@ static void game_update(void) {
     pd->system->getButtonState(&cur, &pushed, &released);
     handle_crank();
 #ifdef LAVA_AUTOTEST
-    if (autotest_crank_override >= 0 && palette_open != autotest_crank_override) {
-        palette_open = autotest_crank_override;
-        chrome_dirty = 1;
-    }
+    pushed |= synth_pushed;
+    released |= synth_released;
+    synth_cur = (synth_cur | synth_pushed) & ~synth_released;
+    cur |= synth_cur;
+    synth_pushed = synth_released = 0;
 #endif
     handle_buttons(cur, pushed, released);
     if (needs_redraw) {     // the keyboard opened or closed
@@ -1371,42 +1379,50 @@ static float keys_crank;
 
 static void keys_draw(void) {
     pd->graphics->clear(kColorWhite);
-    int y = 8 - keys_scroll;
+    int y = 8 - keys_scroll, cx = 106, col = 140;
     char line[160];
     text(font, profile->name, 12, y);
+    text(small_font, "Ⓑ back", 388 - text_w(small_font, "Ⓑ back"), y + 4);
     y += 22;
     pd->graphics->drawLine(12, y, 388, y, 1, kColorBlack);
     y += 6;
     text(small_font, "Buttons", 12, y);
-    text(small_font, "D-pad: arrows    Ⓐ: Enter    Ⓑ (tap): Esc", 120, y);
-    y += 18;
-    static const char* names[4] = {"Ⓑ + ▲", "Ⓑ + ▶", "Ⓑ + ▼", "Ⓑ + ◀"};
-    text(small_font, "Chords", 12, y);
-    int any = 0;
+    text(small_font, "✛ arrows    Ⓐ Enter    Ⓑ (tap) Esc", cx, y);
+    y += 20;
+    static const char* names[4] = {"⬆️", "➡️", "⬇️", "⬅️"};
+    text(small_font, "Ⓑ held + ✛", 12, y);
+    int n = 0;
     for (int d = 0; d < 4; d++) {
         const ProfileKey* k = &profile->chord[d];
         if (!k->code) continue;
-        snprintf(line, sizeof line, "%s: %s (%s)", names[d], k->label ? k->label : key_name(k->code), key_name(k->code));
-        text(small_font, line, 120, y);
-        y += 16;
-        any = 1;
+        const char* l = k->label ? k->label : key_name(k->code);
+        if (strcmp(l, key_name(k->code))) snprintf(line, sizeof line, "%s %s (%s)", names[d], l, key_name(k->code));
+        else snprintf(line, sizeof line, "%s %s", names[d], l);
+        text(small_font, line, cx + (n % 2) * col, y);
+        if (n++ % 2) y += 16;
     }
-    if (!any) y += 16;
+    if (n % 2 || !n) y += 16;
     y += 4;
-    text(small_font, "Crank palette", 12, y);
-    text(small_font, "Undock the crank, turn it to a key, Ⓐ presses it:", 120, y);
-    y += 16;
+    text(small_font, "Crank out", 12, y);
+    y = draw_wrapped(small_font, "A reel of keys opens under the screen. Turn the crank to pick one; Ⓐ presses it, "
+                                 "then the reel returns to Enter. Dock the crank to close it.", cx, y, 388 - cx, 1);
     for (int i = 0; i < profile->npalette; i++) {
         const ProfileKey* k = &profile->palette[i];
-        snprintf(line, sizeof line, "%s (%s)", k->label ? k->label : key_name(k->code), key_name(k->code));
-        text(small_font, line, 120 + (i % 2) * 140, y);
+        const char* l = k->label ? k->label : key_name(k->code);
+        if (strcmp(l, key_name(k->code))) snprintf(line, sizeof line, "%s (%s)", l, key_name(k->code));
+        else snprintf(line, sizeof line, "%s", l);
+        text(small_font, line, cx + (i % 2) * col, y);
         if (i % 2) y += 16;
     }
     if (profile->npalette % 2) y += 16;
-    text(small_font, "Keyboard (every key): last palette item, or Menu > keyboard", 120, y);
-    y += 22;
-    if (profile->notes) y = draw_wrapped(small_font, profile->notes, 12, y, 376, 1);
-    text(small_font, "Ⓑ back", 340, 222);
+    y += 4;
+    text(small_font, "Keyboard", 12, y);
+    y = draw_wrapped(small_font, "Every key, for names and passwords: the reel's last item, or Menu > keyboard.", cx, y,
+                     388 - cx, 1) + 4;
+    if (profile->notes) {
+        text(small_font, "This game", 12, y);
+        draw_wrapped(small_font, profile->notes, cx, y, 388 - cx, 1);
+    }
 }
 
 static void keys_update(void) {
@@ -1545,7 +1561,7 @@ static void picker_draw(void) {
     if (entry_count == 0)
         draw_wrapped(small_font, "No games found. Put a folder with a .lav program (and its LavaData) in Games/ in "
                                  "LavaEmu's Data folder.", 16, 80, 368, 1);
-    text(small_font, "Ⓐ play     crank or ▲▼ choose", 16, 222);
+    text(small_font, "Ⓐ play     crank or ⬆️⬇️ choose", 16, 222);
 }
 
 static void picker_update(void) {
@@ -1653,7 +1669,8 @@ static void autotest_shot(const char* name) {
 
 // Each script: tokens separated by spaces. KEY taps a LAVA key by name (ENTER,
 // ESC, UP, F1, y...), ~N waits N VM frames, shot:NAME saves the screen,
-// pal:N opens the crank palette with item N selected, pal:off closes it,
+// undock/dock the crank, crank:N turns it N palette steps, press:X/release:X
+// a button (A, B, UP, DOWN, LEFT, RIGHT),
 // kb:on/kb:off the keyboard, opts / keys open those screens, stats logs timings.
 typedef struct {
     const char* program;
@@ -1662,15 +1679,19 @@ typedef struct {
 
 static const AutotestGame autotest_games[] = {
     {"FrogMonopoly.lav", "~240 stats shot:frog-title ENTER ~60 ENTER ~60 ENTER ~60 ENTER ~90 ENTER ~60 DOWN ~20 "
-                         "ENTER ~60 ENTER ~60 y ~60 DOWN ~20 ENTER ~200 shot:frog-map ESC ~60 pal:1 ~20 shot:frog-palette "
-                         "palpress ~60 shot:frog-nexttab pal:off ~10 stats"},
-    {"AceAttorney.lav", "~300 shot:ace-title ENTER ~120 ENTER ~120 ENTER ~120 ENTER ~120 shot:ace-intro pal:1 ~10 "
-                        "shot:ace-palette pal:off stats"},
-    {"Hero.lav", "~400 shot:newhero-title ENTER ~200 shot:newhero-2 ENTER ~200 ENTER ~200 shot:newhero-3 stats"},
-    {"ShuRegister.lav", "~300 shot:shushan-register kb:on ~10 shot:shushan-keyboard kb:off stats"},
+                         "ENTER ~60 ENTER ~60 y ~60 DOWN ~20 ENTER ~200 shot:frog-map ESC ~60 undock ~4 crank:1 ~10 "
+                         "shot:frog-palette press:A ~4 release:A ~60 shot:frog-nexttab dock ~10 press:B ~2 "
+                         "shot:frog-chords press:LEFT ~4 release:LEFT ~2 release:B ~60 shot:frog-prevtab "
+                         "press:B ~2 release:B ~60 shot:frog-esc stats keys:frog-keys ~10"},
+    {"AceAttorney.lav", "~300 shot:ace-title ENTER ~120 ENTER ~120 ENTER ~120 ENTER ~120 shot:ace-intro undock ~4 "
+                        "crank:1 ~10 shot:ace-palette dock stats keys:ace-keys ~10"},
+    {"Hero.lav", "~400 shot:newhero-title ENTER ~200 shot:newhero-2 ENTER ~200 ENTER ~200 shot:newhero-3 stats keys:newhero-keys ~10"},
+    {"ShuRegister.lav", "~300 shot:shushan-register undock ~4 crank:-1 ~10 shot:shushan-palkb press:A ~2 "
+                        "release:A ~10 shot:shushan-keyboard kb:off dock stats keys:shushan-keys ~10"},
     {"ShuHeroes.lav", "~400 shot:shushan-title ENTER ~200 shot:shushan-2 stats"},
     {"SkyLand2.lav", "~300 shot:seal-title ENTER ~120 shot:seal-menu ENTER ~300 ENTER ~200 shot:seal-intro y ~60 "
-                     "pal:1 ~10 shot:seal-palette pal:off stats keys ~10 shot:seal-keys"},
+                     "undock ~4 crank:1 ~10 shot:seal-palette dock border:2 ~60 shot:seal-device border:1 perf:1 ~400 "
+                     "shot:seal-black-perf perf:0 border:0 ~10 stats opts:seal-options keys:seal-keys ~10"},
 };
 
 static int autotest_index = -1;
@@ -1736,20 +1757,12 @@ static void autotest_update(void) {
         autotest_pos = autotest_games[autotest_index].script;
         autotest_wait_until = 0;
         autotest_crank_override = 0;
+        synth_cur = 0;
         return;
-    }
-    if (screen == SCREEN_KEYS || screen == SCREEN_OPTIONS) {
-        if (game_frames >= autotest_wait_until) {
-            screen = SCREEN_GAME;
-            needs_redraw = 1;
-        } else {
-            game_frames += 2;
-            return;
-        }
     }
     if (!vm || screen != SCREEN_GAME || game_frames < autotest_wait_until) return;
     for (int i = 0; i < 8; i++)
-        if (slots[i].active) return;
+        if (slots[i].active && !slots[i].phys) return;
     while (*autotest_pos == ' ') autotest_pos++;
     if (!*autotest_pos) {
         autotest_crank_override = -1;
@@ -1768,30 +1781,35 @@ static void autotest_update(void) {
         autotest_shot(tok + 5);
     } else if (!strcmp(tok, "stats")) {
         autotest_stats("stats");
-    } else if (!strncmp(tok, "pal:", 4)) {
-        if (!strcmp(tok + 4, "off")) {
-            autotest_crank_override = 0;
-            palette_sel = 0;
-        } else {
-            autotest_crank_override = 1;
-            palette_open = 1;
-            palette_sel = atoi(tok + 4);
-        }
-        chrome_dirty = 1;
-    } else if (!strcmp(tok, "palpress")) {
-        int code = palette_code(palette_sel);
-        if (code > 0) {
-            key_press(code);
-            key_release(code);
-        }
-        palette_sel = 0;
-        chrome_dirty = 1;
+    } else if (!strcmp(tok, "undock") || !strcmp(tok, "dock")) {
+        autotest_crank_override = !strcmp(tok, "undock");
+    } else if (!strncmp(tok, "crank:", 6)) {
+        synth_crank = CRANK_STEP * (float)atoi(tok + 6) + (atoi(tok + 6) > 0 ? 1.0f : -1.0f);
+    } else if (!strncmp(tok, "press:", 6) || !strncmp(tok, "release:", 8)) {
+        int rel = tok[0] == 'r';
+        const char* b = tok + (rel ? 8 : 6);
+        PDButtons m = !strcmp(b, "A") ? kButtonA : !strcmp(b, "B") ? kButtonB : !strcmp(b, "UP") ? kButtonUp
+                    : !strcmp(b, "DOWN") ? kButtonDown : !strcmp(b, "LEFT") ? kButtonLeft : kButtonRight;
+        if (rel) synth_released |= m;
+        else synth_pushed |= m;
+        autotest_wait_until = game_frames + 2;
     } else if (!strncmp(tok, "kb:", 3)) {
         open_keyboard(!strcmp(tok + 3, "on"));
-    } else if (!strcmp(tok, "keys")) {
-        screen = SCREEN_KEYS;
+    } else if (!strncmp(tok, "border:", 7)) {
+        settings.border = atoi(tok + 7);
+        needs_redraw = 1;
+    } else if (!strncmp(tok, "perf:", 5)) {
+        settings.show_perf = atoi(tok + 5);
+        chrome_dirty = 1;
+    } else if (!strncmp(tok, "opts:", 5)) {
+        opt_selected = OPT_BORDER;
+        options_draw();
+        autotest_shot(tok + 5);
+        needs_redraw = 1;
+    } else if (!strncmp(tok, "keys:", 5)) {
         keys_draw();
-        autotest_wait_until = game_frames + 2;
+        autotest_shot(tok + 5);
+        needs_redraw = 1;
     } else {
         int code = key_by_name(tok);
         if (code) {

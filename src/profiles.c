@@ -19,9 +19,10 @@ static const Profile profiles[] = {
      1, "R opens the Court Record (and presents evidence). Everything else is Enter, Esc and arrows."},
     {"newhero", "New Heroes' Altar",
      {K('y', "Yes"), NONE, K('n', "No"), NONE},
-     {K('y', "Yes"), K('n', "No"), K('c', "C"), K('k', "K"), K('b', "B"), K('d', "D"), K('f', "F"), K('h', "H"),
-      K('r', "R")},
-     9, "Esc on the map opens the status and menu pages; Enter talks and confirms."},
+     {K('y', "Yes"), K('n', "No"), K('c', "Challenge"), K('k', "Kill"), K('h', "Head off"), K('b', "Body off"),
+      K('d', "Hand off"), K('f', "Feet off"), K('r', "Reset keys")},
+     9, "Esc on the map opens the status and menu pages. Fight mode: C challenge, K kill. Gear page: H B D F take "
+        "off head, body, hand, feet."},
     {"shushan", "Heroes of Mount Shu",
      {K(LK_F1, "Gear"), K(LK_F2, "Items"), K(LK_F3, "Status"), K(LK_F4, "Arts")},
      {K(LK_F1, "Gear"), K(LK_F2, "Items / Del"), K(LK_F3, "Status"), K(LK_F4, "Arts"), K('p', "Points"),
