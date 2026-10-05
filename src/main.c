@@ -1692,7 +1692,9 @@ static const AutotestGame autotest_games[] = {
                          "ENTER ~60 ENTER ~60 y ~60 DOWN ~20 ENTER ~200 shot:frog-map ESC ~60 undock ~4 crank:1 ~10 "
                          "shot:frog-palette press:A ~4 release:A ~60 shot:frog-nexttab dock ~10 press:B ~2 "
                          "shot:frog-chords press:LEFT ~4 release:LEFT ~2 release:B ~60 shot:frog-prevtab "
-                         "press:B ~2 release:B ~60 shot:frog-esc stats keys:frog-keys ~10"},
+                         "press:B ~2 release:B ~60 shot:frog-esc stats keys:frog-keys ~10 s ~60 shot:frog-quicksave ENTER ~120 ls "
+                         "savestate ESC ~60 restart ~300 ENTER ~60 ENTER ~60 ENTER ~60 shot:frog-restarted loadstate ~30 "
+                         "shot:frog-loadstate r ~60 ENTER ~120 shot:frog-quickload"},
     {"AceAttorney.lav", "~300 shot:ace-title ENTER ~120 ENTER ~120 ENTER ~120 ENTER ~120 shot:ace-intro undock ~4 "
                         "crank:1 ~10 shot:ace-palette dock stats keys:ace-keys ~10"},
     {"Hero.lav", "~400 shot:newhero-title ENTER ~200 shot:newhero-2 ENTER ~200 ENTER ~200 shot:newhero-3 stats keys:newhero-keys ~10"},
@@ -1703,6 +1705,15 @@ static const AutotestGame autotest_games[] = {
                      "undock ~4 crank:1 ~10 shot:seal-palette dock border:2 ~60 shot:seal-device border:1 perf:1 ~400 "
                      "shot:seal-black-perf perf:0 border:0 ~10 stats opts:seal-options keys:seal-keys ~10"},
 };
+
+static const char* autotest_ls_prefix;
+static void autotest_ls(const char* name, void* ud) {
+    (void)ud;
+    char path[200];
+    snprintf(path, sizeof path, "%s/%s", autotest_ls_prefix, name);
+    FileStat st;
+    if (pd->file->stat(path, &st) == 0) autotest_printf("   save file %s (%d bytes)", path, (int)st.size);
+}
 
 static int autotest_index = -1;
 static const char* autotest_pos;
@@ -1805,6 +1816,23 @@ static void autotest_update(void) {
         autotest_wait_until = game_frames + 2;
     } else if (!strncmp(tok, "kb:", 3)) {
         open_keyboard(!strcmp(tok + 3, "on"));
+    } else if (!strcmp(tok, "savestate")) {
+        save_state();
+        autotest_printf("   %s", toast_text);
+    } else if (!strcmp(tok, "loadstate")) {
+        load_state();
+        autotest_printf("   %s", toast_text);
+    } else if (!strcmp(tok, "restart")) {
+        restart_game();
+        autotest_printf("   restarted");
+    } else if (!strcmp(tok, "ls")) {
+        char dir[100];
+        save_dir(dir, sizeof dir);
+        autotest_ls_prefix = dir;
+        pd->file->listfiles(dir, autotest_ls, NULL, 0);
+        snprintf(dir, sizeof dir, "%s/LavaData", autotest_ls_prefix);
+        autotest_ls_prefix = dir;
+        pd->file->listfiles(dir, autotest_ls, NULL, 0);
     } else if (!strncmp(tok, "border:", 7)) {
         settings.border = atoi(tok + 7);
         needs_redraw = 1;
