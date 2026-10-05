@@ -259,11 +259,10 @@ static inline int src_bit(const uint8_t* src, uint32_t src_len, uint32_t a, int 
     return (src[i] >> (7 - (k & 7))) & 1;
 }
 
-static inline uint8_t src_byte(const uint8_t* src, uint32_t src_len, uint32_t i) {
-    return i < src_len ? src[i] : 0;
-}
-
-// WriteBlock / glyph blit (screen.py draw_data).
+// WriteBlock / glyph blit (screen.py draw_data). Each destination byte takes
+// 8 source bits through a funnel shift; the destination mask (clipped to the
+// screen and to the block) keeps only the block's own pixels, so bits from the
+// row padding or the next row never land. Mirrored blocks go pixel by pixel.
 static void draw_data(LavaVM* vm, uint32_t base, int x, int y, int w, int h, const uint8_t* src, uint32_t src_len,
                       uint32_t addr, int mode, int mirror, int inverse) {
     if (w <= 0 || h <= 0 || x >= W || y >= H || x + w < 0 || y + h < 0) return;
@@ -274,51 +273,75 @@ static void draw_data(LavaVM* vm, uint32_t base, int x, int y, int w, int h, con
     int x1 = x + w < W ? x + w : W;
     if (x1 <= x0) return;
     uint8_t* mem = vm->mem;
-    int bx0 = x0 >> 3, bx1 = (x1 - 1) >> 3;
-    for (int r = 0; r < h; r++) {
-        int yy = y + r;
-        if (yy < 0 || yy >= H) continue;
+    int bx0 = x0 >> 3, bx1 = (x1 - 1) >> 3, nb = bx1 - bx0 + 1;
+    uint8_t mfirst = 0xFF >> (x0 - bx0 * 8);
+    uint8_t mlast = (uint8_t)(0xFF << (bx1 * 8 + 8 - x1));
+    if (nb == 1) mfirst &= mlast, mlast = mfirst;
+    int sh = (8 - (x & 7)) & 7;                 // source bit offset of a byte's first pixel, mod 8
+    int i0 = (8 * bx0 - x + 8 * 1024) / 8 - 1024;  // floor((8*bx0 - x) / 8): may be -1
+    uint8_t inv = inverse ? 0xFF : 0;
+    int ry0 = y < 0 ? -y : 0, ry1 = y + h > H ? H - y : h;
+    for (int r = ry0; r < ry1; r++) {
         uint32_t a = addr + (uint32_t)r * bpl;
-        uint8_t* drow = mem + base + yy * BPL;
-        for (int bx = bx0; bx <= bx1; bx++) {
-            int px0 = bx * 8;
-            uint8_t mask = 0xFF;
-            if (px0 < x0) mask &= 0xFF >> (x0 - px0);
-            if (px0 + 8 > x1) mask &= (uint8_t)(0xFF << (px0 + 8 - x1));
-            uint8_t s;
-            if (!mirror) {
-                int k = px0 - x;   // source bit of the byte's first pixel
-                if (k >= 0) {
-                    uint32_t i = a + (k >> 3);
-                    int sh = k & 7;
-                    s = sh ? (uint8_t)(src_byte(src, src_len, i) << sh | src_byte(src, src_len, i + 1) >> (8 - sh))
-                           : src_byte(src, src_len, i);
+        uint8_t* d = mem + base + (y + r) * BPL + bx0;
+        uint8_t sb[BPL];
+        if (!mirror && (m == 0 || m == 1 || m == 6 || m == 7)) {
+            // plain copy, the common case (full-screen pictures): fused, edges masked
+            int64_t first = (int64_t)a + i0;
+            if (first >= 0 && first + nb + 1 <= (int64_t)src_len) {
+                const uint8_t* q = src + first;
+                if (sh) {
+                    d[0] = (uint8_t)((d[0] & ~mfirst) | (((q[0] << sh | q[1] >> (8 - sh)) ^ inv) & mfirst));
+                    for (int j = 1; j < nb - 1; j++) d[j] = (uint8_t)((q[j] << sh | q[j + 1] >> (8 - sh)) ^ inv);
                 } else {
-                    s = (uint8_t)(src_byte(src, src_len, a) >> (-k));
+                    d[0] = (uint8_t)((d[0] & ~mfirst) | ((q[0] ^ inv) & mfirst));
+                    if (inv) for (int j = 1; j < nb - 1; j++) d[j] = (uint8_t)~q[j];
+                    else if (nb > 2) memcpy(d + 1, q + 1, nb - 2);
                 }
-                // bits past column w of the row belong to padding or the next row
-                int valid_end = x + w - px0;    // pixels of this byte inside the source
-                if (valid_end < 8) s &= (uint8_t)(0xFF << (8 - valid_end));
+                if (nb > 1) {
+                    int j = nb - 1;
+                    uint8_t v = sh ? (uint8_t)(q[j] << sh | q[j + 1] >> (8 - sh)) : q[j];
+                    d[j] = (uint8_t)((d[j] & ~mlast) | ((v ^ inv) & mlast));
+                }
+                continue;
+            }
+        }
+        if (!mirror) {
+            int64_t first = (int64_t)a + i0;
+            if (first >= 0 && first + nb + 1 <= (int64_t)src_len) {
+                const uint8_t* q = src + first;
+                if (sh) for (int j = 0; j < nb; j++) sb[j] = (uint8_t)(q[j] << sh | q[j + 1] >> (8 - sh));
+                else memcpy(sb, q, nb);
             } else {
-                s = 0;
-                for (int b = 0; b < 8; b++) {
-                    int j = px0 + b - x;
-                    if (j < 0 || j >= w) continue;
-                    if (src_bit(src, src_len, a, w - 1 - j)) s |= 0x80 >> b;
+                for (int j = 0; j < nb; j++) {
+                    int64_t i = first + j;
+                    uint8_t hi = i >= 0 && i < (int64_t)src_len ? src[i] : 0;
+                    uint8_t lo = i + 1 >= 0 && i + 1 < (int64_t)src_len ? src[i + 1] : 0;
+                    sb[j] = sh ? (uint8_t)(hi << sh | lo >> (8 - sh)) : hi;
                 }
             }
-            if (inverse) s = ~s;
-            s &= mask;
-            uint8_t d = drow[bx];
-            uint8_t n;
-            switch (m) {
-            case 2: n = (d & ~mask) | (~s & mask); break;
-            case 3: n = d | s; break;
-            case 4: n = (d & ~mask) | (d & s); break;
-            case 5: n = d ^ s; break;
-            default: n = (d & ~mask) | s; break;
+        } else {
+            for (int j = 0; j < nb; j++) {
+                uint8_t v = 0;
+                for (int b = 0; b < 8; b++) {
+                    int px = (bx0 + j) * 8 + b - x;
+                    if (px < 0 || px >= w) continue;
+                    if (src_bit(src, src_len, a, w - 1 - px)) v |= 0x80 >> b;
+                }
+                sb[j] = v;
             }
-            drow[bx] = n;
+        }
+        // apply: masks only differ from 0xFF at the two ends
+        for (int j = 0; j < nb; j++) {
+            uint8_t mask = j == 0 ? mfirst : j == nb - 1 ? mlast : 0xFF;
+            uint8_t sv = (uint8_t)((sb[j] ^ inv) & mask), dv = d[j];
+            switch (m) {
+            case 2: d[j] = (uint8_t)((dv & ~mask) | (~sv & mask)); break;
+            case 3: d[j] = dv | sv; break;
+            case 4: d[j] = (uint8_t)((dv & ~mask) | (dv & sv)); break;
+            case 5: d[j] = dv ^ sv; break;
+            default: d[j] = (uint8_t)((dv & ~mask) | sv); break;
+            }
         }
     }
 }
@@ -730,7 +753,7 @@ static int fopen_(LavaVM* vm, const char* name, const char* mode_in) {
         LavaFile* f = &vm->files[idx];
         h->blob = f->blob;
         f->blob->refs++;
-        snprintf(h->name, sizeof h->name, "%s", f->name);
+        memcpy(h->name, f->name, sizeof h->name);
         h->r = 1;
         h->w = mode[1] == '+';
         h->pos = 0;
@@ -773,7 +796,7 @@ static int fopen_(LavaVM* vm, const char* name, const char* mode_in) {
         LavaFile* f = &vm->files[idx];
         h->blob = f->blob;
         f->blob->refs++;
-        snprintf(h->name, sizeof h->name, "%s", f->name);
+        memcpy(h->name, f->name, sizeof h->name);
         h->r = mode[1] == '+';
         h->w = 1;
         h->pos = f->blob->len;
@@ -861,7 +884,22 @@ static inline void wr8(LavaVM* vm, uint32_t a, int32_t v) { vm->mem[a & 0xFFFF] 
         vm->stack[vm->sp++] = _v;   \
     } while (0)
 
+#ifdef LAVA_PROFILE
+uint64_t lava_sys_count[256];
+double lava_sys_time[256];
+double lava_prof_now(void);
+static int sys_call_(LavaVM* vm, int op);
 static int sys_call(LavaVM* vm, int op) {
+    double t = lava_prof_now();
+    int r = sys_call_(vm, op);
+    lava_sys_time[op] += lava_prof_now() - t;
+    lava_sys_count[op]++;
+    return r;
+}
+static int sys_call_(LavaVM* vm, int op) {
+#else
+static int sys_call(LavaVM* vm, int op) {
+#endif
     uint8_t* mem = vm->mem;
     vm->sys_since_key++;
     switch (op) {
@@ -876,6 +914,9 @@ static int sys_call(LavaVM* vm, int op) {
     }
     case 0x88: {    // WriteBlock(x, y, w, h, type, data)
         POPN(6);
+#ifdef LAVA_PROFILE
+        if (getenv("BLITLOG")) fprintf(stderr, "WB x=%d y=%d w=%d h=%d t=%#x\n", s16(A[0]), s16(A[1]), s16(A[2]), s16(A[3]), A[4]);
+#endif
         int32_t t = A[4];
         uint32_t base = (t & 0x40) ? LAVA_GRAPH : LAVA_GBUF;
         draw_data(vm, base, s16(A[0]), s16(A[1]), s16(A[2]), s16(A[3]), mem, MEM_END, (uint32_t)A[5] & 0xFFFF, t,
@@ -1635,7 +1676,7 @@ void lava_run_frame(LavaVM* vm) {
 // Save states: a flat little-endian record. Files marked dirty (saves the
 // game wrote) are included; bundled data files are not.
 
-#define STATE_MAGIC 0x3156414C   // "LAV1"
+#define STATE_MAGIC 0x3256414C   // "LAV2"
 
 typedef struct {
     uint8_t* p;
@@ -1685,6 +1726,14 @@ static uint32_t state_write(const LavaVM* vm, uint8_t* buf, uint32_t cap) {
         if (!h->used) continue;
         put(&o, h->name, LAVA_NAME_MAX);
         put32(&o, h->pos);
+        // a handle still sharing its file's bytes is stored as a reference
+        const LavaFile* f = NULL;
+        for (int k = 0; k < vm->nfiles; k++)
+            if (!strcmp(vm->files[k].name, h->name)) f = &vm->files[k];
+        if (f && f->blob == h->blob) {
+            put32(&o, 0xFFFFFFFFu);
+            continue;
+        }
         put32(&o, h->blob->len);
         put(&o, h->blob->data, h->blob->len);
     }
@@ -1774,6 +1823,17 @@ int lava_state_load(LavaVM* vm, const uint8_t* buf, uint32_t len) {
         h->name[LAVA_NAME_MAX - 1] = 0;
         h->pos = get32(&in);
         uint32_t n = get32(&in);
+        if (n == 0xFFFFFFFFu) {
+            LavaFile* f = lava_find_file(vm, h->name);
+            if (!f) {
+                in.bad = 1;
+                break;
+            }
+            h->blob = f->blob;
+            f->blob->refs++;
+            h->used = 1, h->r = hf[1], h->w = hf[2];
+            continue;
+        }
         if (in.pos + n > in.n) {
             in.bad = 1;
             break;

@@ -58,7 +58,7 @@ endif
 # Bundled/. Nothing from it is committed.
 WQX_TL ?= $(HOME)/wqx_tl
 
-.PHONY: bundled games host check autotest run FORCE
+.PHONY: bundled games host check autotest run bench FORCE
 
 bundled:
 	@mkdir -p games Source/Bundled
@@ -89,3 +89,12 @@ autotest:
 	$(MAKE) clean
 	$(MAKE) simulator UDEFS=-DLAVA_AUTOTEST
 	open -a "$(SDK)/bin/Playdate Simulator.app" $(PRODUCT)
+
+host/bench: tools/bench.c src/lava.c src/lava.h
+	@mkdir -p host
+	$(HOST_CC) -Os -o $@ tools/bench.c src/lava.c
+
+bench: host/bench
+	@for g in FrogMonopoly:FrogMonopoly.lav AceAttorney:AceAttorney.lav NewHeroesAltar:Hero.lav \
+	  HeroesOfMountShu:ShuHeroes.lav HeroesOfMountShu:ShuRegister.lav SkyLand2:SkyLand2.lav; do \
+	  host/bench games/$${g%%:*} $${g##*:}; done

@@ -52,6 +52,7 @@ class Stats:
         self.label = ""
         self.max_div = 5
         self.keys = None          # --keys: {game: {(kind, value): count}}
+        self.timing = None        # --timing: {label: [seconds per C frame]}
 
 
 S = Stats()
@@ -142,7 +143,10 @@ def run_frames(self, n=1):
             _orig_run_frames(self, 1)
         finally:
             w.done()
+        t_c = time.perf_counter()
         cv.run_frame()
+        if S.timing is not None:
+            S.timing.setdefault(S.label, []).append(time.perf_counter() - t_c)
         S.frames += 1
         if S.keys is not None:
             g = S.keys.setdefault(S.label.split()[0], {})
@@ -220,6 +224,8 @@ def main(argv):
     games = games or ["frog", "ace", "newhero", "shushan", "seal"]
     if "--keys" in argv:
         S.keys = {}
+    if "--timing" in argv:
+        S.timing = {}
     import contextlib
     import io
     total_fail = 0
@@ -238,6 +244,15 @@ def main(argv):
             print(f"{label:34s} frames {S.frames - f0:7d}  syncs {S.syncs - s0:5d}  tainted {S.tainted - t0:4d}  "
                   f"divergent {len(S.divs) - d0:3d}  {time.time() - t:6.1f}s{err}", flush=True)
             total_fail += len(S.divs) - d0
+    if S.timing is not None:
+        # host time of the C VM per frame; device estimate x175 (bbk_playdate's fast core:
+        # 0.080 ms/frame on this kind of Mac, 14 ms on a Rev B Playdate)
+        print(f"{'route':34s} {'p50 us':>8s} {'p99 us':>8s} {'max us':>8s} {'>2ms dev':>9s}")
+        for label, ts in S.timing.items():
+            ts = sorted(ts)
+            slow = sum(1 for t in ts if t * 175 > 0.002)
+            print(f"{label:34s} {ts[len(ts) // 2] * 1e6:8.1f} {ts[int(len(ts) * 0.99)] * 1e6:8.1f} "
+                  f"{ts[-1] * 1e6:8.1f} {100.0 * slow / len(ts):8.1f}%")
     if S.keys is not None:
         import json
         for g, d in S.keys.items():

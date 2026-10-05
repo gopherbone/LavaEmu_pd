@@ -1214,10 +1214,20 @@ static void game_update(void) {
 
     float t0 = pd->system->getElapsedTime();
     uint64_t ops0 = vm->ops;
-    for (int i = 0; i < frames && !vm->ended; i++) {
+    // Time-boxed: if the VM can't keep up (a game redrawing the whole screen
+    // hundreds of times a frame), it runs slower rather than the Playdate
+    // dropping to a few updates a second.
+    int ran = 0;
+    for (; ran < frames && !vm->ended; ran++) {
         tick_keys();
         lava_run_frame(vm);
+        if (pd->system->getElapsedTime() - t0 > 0.024f) {
+            ran++;
+            frame_acc = 0;
+            break;
+        }
     }
+    frames = ran;
     float spent = (pd->system->getElapsedTime() - t0) * 1000.0f;
     if (frames > 0) {
         if (game_frames >= 300 && game_frames + frames <= 600) bench_ms += spent;
