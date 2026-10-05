@@ -412,7 +412,6 @@ static void collect_folder(const char* name, void* ud) {
         snprintf(e->program, sizeof e->program, "%s", g.progs[i]);
         snprintf(e->label, sizeof e->label, "%s", g.labels[i]);
         e->order = i;
-        if (g.programs > 1 && !g.labels[i][0] && i > 0) snprintf(e->label, sizeof e->label, "%s", g.progs[i]);
     }
 }
 
@@ -449,6 +448,17 @@ static Profile auto_profile;
 static int state_slot = 1;
 
 static float frame_cost_ms, render_ms;
+// windowed figures for the autotest's perf log
+static float perf_sum_ms, perf_max_ms, perf_render_max;
+static int perf_frames, perf_updates;
+static uint64_t perf_ops;
+static unsigned int perf_start_ms;
+static void perf_reset(void) {
+    perf_sum_ms = perf_max_ms = perf_render_max = 0;
+    perf_frames = perf_updates = 0;
+    perf_ops = 0;
+    perf_start_ms = pd->system->getCurrentTimeMilliseconds();
+}
 static float ops_per_frame;
 static int frame_acc;               // thousandths of a VM frame
 static unsigned int last_ms;
@@ -680,7 +690,7 @@ static void tick_keys(void) {
         if (!s->active) continue;
         s->frames++;
         if (!s->phys) {
-            if (vm->seen[s->code] || s->frames >= TAP_MAX_FRAMES) {
+            if ((vm->seen[s->code] || s->frames >= TAP_MAX_FRAMES) && s->frames >= profile->min_hold) {
                 lava_key_up(vm, s->code, 0);
                 s->active = 0;
             }
@@ -1291,6 +1301,10 @@ static void game_update(void) {
         float cost = spent / frames;
         frame_cost_ms = frame_cost_ms == 0 ? cost : frame_cost_ms * 0.9f + cost * 0.1f;
         float opf = (float)(vm->ops - ops0) / frames;
+        perf_sum_ms += spent;
+        perf_frames += frames;
+        perf_ops += vm->ops - ops0;
+        if (cost > perf_max_ms) perf_max_ms = cost;
         ops_per_frame = ops_per_frame * 0.9f + opf * 0.1f;
         pd->system->resetElapsedTime();
     }
@@ -1305,7 +1319,10 @@ static void game_update(void) {
 
     float r0 = pd->system->getElapsedTime();
     render_lcd();
-    render_ms = render_ms * 0.9f + (pd->system->getElapsedTime() - r0) * 1000.0f * 0.1f;
+    float rms = (pd->system->getElapsedTime() - r0) * 1000.0f;
+    render_ms = render_ms * 0.9f + rms * 0.1f;
+    if (rms > perf_render_max) perf_render_max = rms;
+    perf_updates++;
 
     static char last_status[8];
     if (toast_frames > 0) {
@@ -1567,7 +1584,7 @@ static const char* credits_head =
 static const char* credits_tail =
     "The VM: a C port of lavaemu (wqx_tl), which follows GVmaker by Eastsun as published in "
     "arucil/GVmakerSE and arucil/MyGVM (MIT, (c) 2018 plodsoft). The 12 and 16 px fonts are "
-    "GVmakerSE's (MIT).\n"
+    "GVmakerSE's (MIT). LavaX support follows LeeSoft's LavaXVM (MIT, (c) 2015 Li Jie).\n"
     "The English games draw their text in bbk_tl Sans, the proportional pixel font from the bbk_tl "
     "translation project, with a small text routine written in LAVA bytecode.\n"
     "Frontend ideas, file layout and the device border follow bbk_playdate. Playdate SDK by Panic.\n"
@@ -1799,15 +1816,15 @@ static const AutotestGame autotest_games[] = {
                         "shot:ace-intro ENTER ~240 ENTER ~240 ENTER ~240 shot:ace-court undock ~4 crank:1 ~10 "
                         "shot:ace-palette dock stats keys:ace-keys ~10"},
     {"Hero.lav", "~400 shot:newhero-title ENTER ~300 shot:newhero-2 ENTER ~400 ENTER ~400 ENTER ~400 shot:newhero-4 "
-                 "ENTER ~400 ENTER ~400 ENTER ~600 shot:newhero-hero ENTER ~600 ENTER ~600 "
-                 "shot:newhero-map ESC ~120 shot:newhero-status ESC ~60 stats keys:newhero-keys ~10"},
+                 "ENTER ~400 ENTER ~400 ENTER ~600 ENTER ~900 ENTER ~900 ENTER ~900 shot:newhero-hero ENTER ~900 "
+                 "ENTER ~1200 shot:newhero-map ESC ~120 shot:newhero-status ESC ~60 stats keys:newhero-keys ~10"},
     {"ShuRegister.lav", "~300 shot:shushan-register ENTER ~120 a ~20 b ~20 c ~20 undock ~4 crank:-1 ~10 "
                         "shot:shushan-palkb press:A ~2 release:A ~10 shot:shushan-keyboard kb:off dock ENTER ~60 "
                         "1 ~20 2 ~20 3 ~20 shot:shushan-typed ENTER ~120 y ~120 shot:shushan-registered stats ls"},
     {"ShuHeroes.lav", "~400 shot:shushan-title ENTER ~300 a ~20 b ~20 c ~20 ENTER ~60 1 ~20 2 ~20 3 ~20 "
                       "ENTER ~300 shot:shushan-login ENTER ~400 ENTER ~200 ENTER ~200 ENTER ~200 ENTER ~200 ENTER ~200 "
                       "shot:shushan-map press:B ~2 shot:shushan-chords "
-                      "press:RIGHT ~4 release:RIGHT ~2 release:B ~200 shot:shushan-items ESC ~200 "
+                      "press:RIGHT ~4 release:RIGHT ~2 release:B ~200 shot:shushan-items perf0 ~300 perf:shushan-items ESC ~200 "
                       "stats keys:shushan-keys ~10"},
     {"SkyLand.lav", "~600 shot:skyland-title ENTER ~300 ENTER ~300 ENTER ~300 y ~150 a ~30 b ~30 c ~30 ENTER ~300 "
                     "b ~300 ENTER ~300 ~600 shot:skyland-map F1 ~200 shot:skyland-f1 ESC ~200 undock ~4 crank:1 ~10 "
@@ -1819,13 +1836,13 @@ static const AutotestGame autotest_games[] = {
                           "ENTER ~400 ENTER ~400 shot:fujia-3 undock ~4 crank:1 ~10 shot:fujia-palette dock stats "
                           "keys:fujia-keys ~10"},
     {"ThreeKingdoms.lav", "~900 shot:sanguo-title ENTER ~400 shot:sanguo-2 ENTER ~400 ENTER ~400 shot:sanguo-3 "
-                          "ENTER ~400 shot:sanguo-4 stats keys:sanguo-keys ~10"},
+                          "perf0 ~300 perf:sanguo-menu ENTER ~400 shot:sanguo-4 perf0 ~300 perf:sanguo-menu2 stats keys:sanguo-keys ~10"},
     {"Snowman.lav", "~300 shot:snowman-splash ENTER ~200 shot:snowman-title ENTER ~300 shot:snowman-2 ENTER ~300 "
                     "shot:snowman-3 press:RIGHT ~60 release:RIGHT press:UP ~6 release:UP ~30 shot:snowman-play stats "
                     "keys:snowman-keys ~10"},
     {"WarCraft.lav", "~600 shot:warcraft-title ENTER ~300 shot:warcraft-race ENTER ~300 ENTER ~300 shot:warcraft-map "
                      "ENTER ~900 shot:warcraft-loading ENTER ~600 shot:warcraft-start stats keys:warcraft-keys ~10"},
-    {"pokemon.lav", "~900 shot:pokemon-field press:A ~8 release:A ~300 shot:pokemon-menu press:A ~8 release:A ~400 "
+    {"pokemon.lav", "~900 shot:pokemon-field perf0 ~300 perf:pokemon-field press:A ~8 release:A ~300 shot:pokemon-menu press:A ~8 release:A ~400 "
                     "press:A ~8 release:A ~400 shot:pokemon-dex "
                     "grey:2 ~30 shot:pokemon-majority grey:0 ~30 shot:pokemon-raw grey:1 ~30 shot:pokemon-dither "
                     "stats keys:pokemon-keys ~10"},
@@ -1833,14 +1850,13 @@ static const AutotestGame autotest_games[] = {
                 "ENTER ~400 shot:school-5 stats keys:school-keys ~10"},
     {"world.lav", "~600 shot:jianghu-title ENTER ~400 ENTER ~400 ENTER ~400 shot:jianghu-2 ENTER ~400 ENTER ~400 "
                   "ENTER ~400 shot:jianghu-3 HELP ~300 shot:jianghu-menu stats keys:jianghu-keys ~10"},
-    {"Worms.lav", "~600 shot:worms-title DOWN ~60 shot:worms-map press:A ~8 release:A ~300 shot:worms-maps "
-                  "press:B ~4 release:B ~200 UP ~60 press:A ~8 release:A ~400 shot:worms-loading SPACE ~300 "
-                  "shot:worms-turn press:LEFT ~40 release:LEFT ~60 shot:worms-walk "
-                  "undock ~4 crank:2 ~10 shot:worms-palette dock stats keys:worms-keys ~10"},
+    {"Worms.lav", "~600 shot:worms-title press:A ~6 release:A ~400 shot:worms-loading SPACE ~300 shot:worms-turn perf0 ~300 perf:worms-turn "
+                  "press:LEFT ~40 release:LEFT ~60 shot:worms-walk press:B ~2 press:UP ~4 release:UP ~2 release:B ~60 "
+                  "shot:worms-jump undock ~4 crank:2 ~10 shot:worms-palette dock stats keys:worms-keys ~10"},
     {"zh:FrogMonopoly-zh", "~240 ENTER ~60 ENTER ~60 shot:zh-frog ENTER ~60 ENTER ~90 ENTER ~60 shot:zh-frog-menu"},
     {"zh:SkyLand2-zh", "~300 ENTER ~120 shot:zh-seal-menu ENTER ~300 shot:zh-seal-intro"},
     {"zh:HeroesOfMountShu-zh", "~400 shot:zh-shushan ENTER ~200 shot:zh-shushan-2"},
-    {"SkyLand2.lav", "~300 shot:seal-title ENTER ~120 shot:seal-menu ENTER ~300 shot:seal-intro ENTER ~300 ENTER ~600 "
+    {"SkyLand2.lav", "~300 shot:seal-title perf0 ~600 perf:seal-title ENTER ~120 shot:seal-menu ENTER ~300 shot:seal-intro ENTER ~300 ENTER ~600 "
                      "shot:seal-prompt y ~90 a ~10 b ~10 c ~10 shot:seal-account ENTER ~60 shot:seal-class ENTER ~60 ENTER ~60 ENTER ~400 "
                      "shot:seal-village F1 ~60 shot:seal-f1 ESC ~60 undock ~4 crank:1 ~10 shot:seal-palette dock "
                      "border:2 ~60 shot:seal-device border:1 perf:1 ~400 shot:seal-black-perf perf:0 border:0 ~10 stats "
@@ -1922,6 +1938,7 @@ static void autotest_update(void) {
         start_game(&entries[autotest_last_entry]);
         autotest_printf("== %s (%s)", entries[autotest_last_entry].title, entries[autotest_last_entry].program);
         autotest_pos = autotest_games[autotest_index].script;
+        perf_reset();
         autotest_wait_until = 0;
         autotest_crank_override = 0;
         synth_cur = 0;
@@ -1932,6 +1949,17 @@ static void autotest_update(void) {
         if (slots[i].active && !slots[i].phys) return;
     while (*autotest_pos == ' ') autotest_pos++;
     if (!*autotest_pos) {
+        autotest_pos = "";
+        {
+            unsigned int wall = pd->system->getCurrentTimeMilliseconds() - perf_start_ms;
+            autotest_printf("   perf %-20s VM avg %d.%02d ms/frame, worst batch %d.%02d ms/frame, %d ops/frame, "
+                            "render max %d.%02d ms, %d fps since the last perf0", "(since perf0)",
+                            (int)(perf_frames ? perf_sum_ms / perf_frames : 0),
+                            (int)(perf_frames ? perf_sum_ms * 100 / perf_frames : 0) % 100, (int)perf_max_ms,
+                            (int)(perf_max_ms * 100) % 100, (int)(perf_frames ? perf_ops / perf_frames : 0),
+                            (int)perf_render_max, (int)(perf_render_max * 100) % 100,
+                            wall ? (int)(perf_updates * 1000 / wall) : 0);
+        }
         autotest_crank_override = -1;
         end_game();
         screen = SCREEN_PICKER;
@@ -1946,6 +1974,17 @@ static void autotest_update(void) {
         autotest_wait_until = game_frames + atoi(tok + 1);
     } else if (!strncmp(tok, "shot:", 5)) {
         autotest_shot(tok + 5);
+    } else if (!strcmp(tok, "perf0")) {
+        perf_reset();
+    } else if (!strncmp(tok, "perf:", 5)) {
+        unsigned int wall = pd->system->getCurrentTimeMilliseconds() - perf_start_ms;
+        autotest_printf("   perf %-20s VM avg %d.%02d ms/frame, worst batch %d.%02d ms/frame, %d ops/frame, "
+                        "render max %d.%02d ms, %d updates in %u ms (%d fps), %d VM frames",
+                        tok + 5, (int)(perf_frames ? perf_sum_ms / perf_frames : 0),
+                        (int)(perf_frames ? perf_sum_ms * 100 / perf_frames : 0) % 100, (int)perf_max_ms,
+                        (int)(perf_max_ms * 100) % 100, (int)(perf_frames ? perf_ops / perf_frames : 0),
+                        (int)perf_render_max, (int)(perf_render_max * 100) % 100, perf_updates, wall,
+                        wall ? (int)(perf_updates * 1000 / wall) : 0, perf_frames);
     } else if (!strcmp(tok, "stats")) {
         autotest_stats("stats");
     } else if (!strcmp(tok, "undock") || !strcmp(tok, "dock")) {

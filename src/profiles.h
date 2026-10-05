@@ -23,6 +23,7 @@ typedef struct {
     const char* notes;      // a line for the key view
     uint8_t dpad[4];        // keys the D-pad sends (up, right, down, left); 0 = the arrows
     ProfileKey a_key;       // what A sends; code 0 = Enter
+    uint8_t min_hold;       // VM frames a tap stays down at least (games that poll slowly)
 } Profile;
 
 const Profile* profile_find(const char* id);

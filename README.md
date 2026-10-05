@@ -15,15 +15,26 @@ and MyGVM, and it runs in lockstep with lavaemu on every frame of the translatio
 
 **Status: works in the Playdate Simulator. Not yet run on a device.**
 
-It comes with five English fan translations from the wqx_tl project:
+It comes with fifteen English fan translations from the wqx_tl project, each run at the pace
+of the machine it was written for (see [Pace](#pace)):
 
-| Game | Original | Notes |
-|---|---|---|
-| **Frog Monopoly** | 蛙蛙大富翁 1.1.2, Hao Xinli (Computer Frog), 2004 | Richman-style board game, 56 maps |
-| **Phoenix Wright: Ace Attorney** | 逆转裁判, Ninja Eric (JunctionSoft), 2004 | the first case, ported from Capcom's GBA game |
-| **New Heroes' Altar** | 新英雄坛说, Fanqinlue (Summer Loft), 2007 | GMUD-style wuxia sandbox |
-| **Heroes of Mount Shu** | 蜀山群侠传, Shi Zehuan (FlySoft), 2006 | wuxia RPG; register an account first |
-| **Sky & Land II: The Sealing Stone** | 幕天席地2：封印之石 1.3, LeeStorm (Molang Team), 2007 | real-time action RPG |
+| Game | Original | Pace | Notes |
+|---|---|---|---|
+| **Frog Monopoly** | 蛙蛙大富翁 1.1.2, Hao Xinli (Computer Frog), 2004 | NC3000 | Richman-style board game, 56 maps |
+| **Phoenix Wright: Ace Attorney** | 逆转裁判, Ninja Eric (JunctionSoft), 2004 | NC3000 | the first case, ported from Capcom's GBA game |
+| **New Heroes' Altar** | 新英雄坛说, Fanqinlue (Summer Loft), 2007 | NC3000 | GMUD-style wuxia sandbox |
+| **Heroes of Mount Shu** | 蜀山群侠传, Shi Zehuan (FlySoft), 2006 | NC3000 | wuxia RPG; register an account first |
+| **Sky & Land** | 幕天席地 1.10, LeeStorm (LastWave), 2006 | NC3000 | action RPG, with its account helper |
+| **Sky & Land II: The Sealing Stone** | 幕天席地2：封印之石 1.3, LeeStorm (LastWave), 2007 | NC3000 | real-time action RPG |
+| **Mario Pipes** | 水管马里奥 1.2, Cloty (Emsky Studio), 2006 | NC3000 | Mario Bros. homage, the build for real machines |
+| **The Millionaire of 3 Kingdoms** | 富甲天下, You Shunhang (Hang'Studio), 2006 | NC3000 | Three Kingdoms board game |
+| **Three Kingdoms** | 三国志, Bsxy and Lee (LeeSoft), 2003 | NC3000 | strategy; LAVA 3.0 encrypted strings |
+| **The Story of the Snowman** | 雪人传奇 1.0, Xu Jiajun | PC emulator | platformer made for PC emulators |
+| **WarCraft** | 魔兽争霸 1.01, Fanqinlue and Shaofan Daotong | NC3000 | turn-based strategy |
+| **Pocket Monsters Grey** | 口袋 (灰度版), unnamed author | NC3000 | Gold/Silver-style demo; grey by flicker, blended |
+| **High School Legend** | 中学传奇 1.05, EPC, 2005 | NC3000 | RPG on FantasyDR's engine |
+| **Jianghu** | 江湖 0.30, JPG Studio, 2005 | NC3000 | wuxia RPG |
+| **Worms** | 百战天虫 1.00, Xiao Qiang, 2006 | TC800 | artillery game for LeeSoft's LavaX VM |
 
 | | |
 |---|---|
@@ -32,18 +43,23 @@ It comes with five English fan translations from the wqx_tl project:
 | ![Heroes of Mount Shu: Items, opened with the B + right chord](docs/shushan-items.png) | ![Sky & Land II: the F1 menu](docs/seal-f1.png) |
 | ![Typing an account name on the keyboard panel](docs/shushan-keyboard.png) | ![Sky & Land II on the Device border](docs/seal-device.png) |
 | ![Chord hints while B is held](docs/frog-chords.png) | ![The key view for Sky & Land II](docs/seal-keys.png) |
+| ![Pocket Monsters Grey: flicker grey blended into a dither](docs/pokemon-dither.png) | ![Worms, a LavaX game](docs/worms.png) |
+| ![Mario Pipes](docs/mario-play.png) | ![WarCraft](docs/warcraft.png) |
 
 More in [docs/](docs): every game's title, the palettes, options, the performance overlay,
 credits, and a Chinese original running on the VM's own fonts.
 
 - The 160×80 LCD is drawn at 2× (320×160), with a white, black or Device border.
+- LavaX programs (LeeSoft's later VM, for the TC800 and PC emulators) run too: their pixel
+  screen in 2-colour, 16-grey or 256-colour mode, floats and the newer system calls.
+- Games that make grey by flickering two pictures get it blended back into a dither.
 - Game saves (the games' own save files) go to the Data folder as they are written; 3
   save-state slots per game.
 - Per-game key profiles: B + D-pad chords and a crank key palette, labelled with what the keys
   do in that game. An on-screen keyboard has every key, for names and passwords.
 - Games you add get an automatic key profile from a scan of their bytecode.
-- Options: border, speed (1×, 2×, 4×), performance overlay, save/load state, the key view,
-  reset.
+- Options: border, speed (1×, 2×, 4×), machine pace, flicker grey, performance overlay,
+  save/load state, the key view, reset.
 
 ## Install
 
@@ -71,8 +87,10 @@ first (`python3 -m lavaemu` in wqx_tl reads them; `tools/bundle.py` shows how).
 title=Heroes of Mount Shu
 title_gb=caf1c9bdc8bacfc0b4ab     (the Chinese title, GB2312 bytes in hex)
 profile=shushan                   (a built-in key profile; leave out for the automatic one)
-program=ShuHeroes.lav
 program=ShuRegister.lav|Register an account (first)
+program=ShuHeroes.lav
+pace=27                           (virtual us per instruction: 27 NC3000, 19 TC800, 4 PC emulator)
+blend=1                           (only for games that make grey by flicker)
 credit=(c) 2006 Shi Zehuan, FlySoft.
 ```
 
@@ -90,7 +108,7 @@ bundled one, so deleting `Saves/<Name>` starts the game fresh.
 | Ⓑ held + D-pad | four game keys per game, shown above the screen while B is held |
 | Crank out | the key palette: a reel of the game's keys under the screen. Turn to pick, Ⓐ presses |
 | Menu → **keyboard** | every key, in a panel under the (moved-up) screen |
-| Menu → **options** | save/load state, slot, border, speed, performance overlay, key view, reset |
+| Menu → **options** | save/load state, slot, border, speed, machine pace, flicker grey, performance overlay, key view, reset |
 | Menu → **game list** | back to the list |
 
 What the chords and the palette send in each game (from the key view, Options → Keys):
@@ -101,10 +119,22 @@ What the chords and the palette send in each game (from the key view, Options �
 | Ace Attorney | Court Record | Court Record |
 | New Heroes' Altar | Yes, –, No, – | Yes, No, Challenge, Kill, Head/Body/Hand/Feet off, Reset keys |
 | Heroes of Mount Shu | Gear, Items, Status, Arts (F1–F4) | Gear, Items / Del, Status, Arts, Points, Yes, No, Caps, Shift |
-| Sky & Land II | Menu (F1), Yes, Pets, No | Menu, Pets, Drop, Yes, No / 2, 1, 3, Space, Caps, PgUp |
+| Sky & Land II | Menu (F1), Yes, Pets, No | Menu, Cast, Pets, Drop, Yes, No / 2, 1, 3, Space, Caps, PgUp |
+| Sky & Land | Stats, Gear, Skills, Items (F1–F4) | Cast, End turn, System, Stats, Gear, Skills, Items, Drop, Yes, No / 2, 1, 3, Space, Caps, Shift |
+| Mario Pipes | Save (F1) | Save, Enter, Jump. **The D-pad sends W D S A and Ⓐ jumps (U)**, as the game wants |
+| Millionaire of 3 Kingdoms | Buy/Recruit, Sell/Dismiss, Map cursor, General | those, PgUp, PgDn, and 1–9, 0 on the letter keypad (B N M G H J T Y U) |
+| Three Kingdoms | – | Space (arrows, Enter and Esc play the game) |
+| Snowman | Pause | Pause, Jump, Throw. **D-pad up jumps (S), down throws (A)** |
+| WarCraft | Base/Shop, End turn, Hero, System | End turn, Base/Shop, Hero, Stats (Caps), Status bar (Shift), System (Help) |
+| Pocket Monsters Grey | Quit | Quit |
+| High School Legend | Menu (Help), Yes | Menu, Yes, Delete, F1, Space |
+| Jianghu | Menu (Help), Yes, Run | Menu, Yes, Run, Delete, Space |
+| Worms | Jump, Weapon mode, Map, Everyone's HP | Start, Jump, Weapon mode, Game menu, HP, Map; hold Ⓐ to charge |
 | any other game | F1–F4 | every key its code compares a key against |
 
-Each palette also has Enter (where it rests) and Keyboard (every key) at its ends.
+Each palette also has Ⓐ's key (Enter; where it rests) and Keyboard (every key) at its ends.
+Names and passwords (Mount Shu, both Sky & Lands, Mario's records, High School Legend,
+Jianghu's diary) are typed on the keyboard.
 
 A tapped key stays down until the game has seen it (read it, or found it held when it polled),
 for at most half a second, so quick taps aren't lost while a game is busy and aren't read
@@ -158,32 +188,64 @@ page. Two of the games need text entry: account names, and a password in Mount S
 - *Raw key names on the palette*: "F2" means Items in one game and Discard card in another;
   the labels come from the profile, with the key name underneath.
 
+## Pace
+
+A real Wenquxing runs LAVA bytecode slowly: about 27 µs an instruction on an NC3000 or TC1000,
+57 on an NC2600, 75 on an NC1020 (wqx_tl's measurements from the 速度检测 benchmark), and about
+19 on LeeSoft's TC800 (from Worms' own speed presets). Games tuned on the hardware run several
+times too fast at the 4 µs a PC emulator (and lavaemu's default) uses. The VM keeps virtual
+time: each instruction costs the game's pace in microseconds and Delay(ms) adds its
+milliseconds, so a game never runs more than 1/60 s ÷ pace instructions per 60 Hz frame (617 at
+27 µs, 4,166 at 4 µs). Each bundled game ships with the pace of the machine it was written for
+(the table above; `pace=` in `game.txt`), and **Options → Machine pace** switches between PC
+emulator (4), TC800 (19), NC3000/TC1000 (27), NC2600 (57) and NC1020 (75) per game.
+
+The frontend runs at 30 fps and runs as many 60 Hz VM frames as real time has passed (two per
+update; 4 or 8 at 2× or 4× speed). Getms and the LavaX tick count follow the virtual clock,
+GetTime the Playdate's.
+
+## Grey
+
+Two kinds of games draw grey on the 1-bit Wenquxing screen:
+
+- **Flicker** (Pocket Monsters Grey): the game alternates pictures on every Refresh, A, B, B,
+  so a pixel is dark for 0 to 3 of every three frames. The Playdate refreshes at 30 Hz, so
+  shown as is, the flicker beats against it and crawls. LavaEmu samples the LCD at every
+  Refresh and blends the last three: **Dither** draws 0, 1, 3 or 4 black dots in each pixel's
+  2×2 cell (four greys, the default for that game), **Majority** shows a pixel black when it's
+  dark in 2 of 3 frames (sharp but loses the light greys), **Off** shows the raw frames. Dither
+  read best in the Simulator: the town's roofs and grass keep their tones and text stays solid
+  (`docs/pokemon-dither.png`, `pokemon-majority.png`, `pokemon-raw.png`). Options → Flicker
+  grey switches it for any game.
+- **LavaX grey** (16 levels, Princess Maker 4 and others): the pixel screen keeps one value a
+  pixel, rendered as 2×2 patterns at 2× (five greys) or a 4×4 Bayer dither for bigger LavaX
+  screens drawn at 1×. Worms checks for LavaX with SetGraphMode(4) and then plays in black and
+  white; grey games aren't bundled yet.
+
 ## Performance
 
-The VM is time-budgeted: like lavaemu, an instruction costs 4 µs of virtual time and Delay(ms)
-adds its milliseconds, so a game never executes more than 4,166 instructions per 1/60 s frame.
-The frontend runs at 30 fps and runs as many 60 Hz VM frames as real time has passed (two per
-update; 4 or 8 at 2× or 4× speed). Getms and GetTime follow the virtual clock and the Playdate's
-clock.
-
-Measured on an Apple-silicon Mac (`make bench`, built `-Os` like the device; `tests/lockstep.py
---timing` for every frame of the QA routes):
+Measured on an Apple-silicon Mac, single process (`make bench`: each program for a virtual
+minute at its shipped pace, built `-Os` like the device; and `tests/lockstep.py --timing` over
+every frame of the QA routes, which adds ctypes overhead):
 
 | Case | Host time per VM frame |
 |---|---|
-| Waiting for a key (most of every game) | 0.1–0.3 µs |
-| Full budget of plain bytecode (New Heroes' Altar's map, Mount Shu's menus) | 8–42 µs |
-| Sky & Land II's title loop: ~115 full-screen WriteBlocks per frame | 78 µs (330 µs before the blit rewrite) |
+| Waiting for a key (most of every game) | 0.1–1 µs |
+| p99 at the shipped pace, `make bench` (all 15 games) | 1–18 µs (Pocket Monsters' flicker loop 18) |
+| p99 of the worst QA route per game (lockstep timing) | 25–67 µs (Sky & Land II's quit screen at 4 µs/op) |
+| Worst single frames | 40–130 µs (Worms' menus, Sky & Land II's title) |
 | Rendering the LCD (changed rows only) | under 1 µs in the Simulator |
 
 The device estimate scales by bbk_playdate's own calibration: its fast 6502 core takes 0.080 ms
-per frame on this Mac and 14 ms on a Rev B Playdate on the same title-screen workload (about
-175×). That puts ordinary frames well under 2 ms, Mount Shu's menus near 7 ms, and the worst
-case, Sky & Land's title animation, near 14 ms per VM frame against 16.7 ms. If the VM can't keep
-up, the frame loop is time-boxed (24 ms per update), so a heavy stretch runs slower instead of the
-Playdate dropping to a few updates a second. These are estimates; turn on **Show performance**
-in options to see the real figure (VM time per frame, its share of the 16.7 ms, instructions
-per frame, draw time, fps, and a `bench` average of frames 300–599).
+per frame on this Mac and 14 ms on a Rev B Playdate on the same workload (about 175×). At the
+shipped paces a busy frame is 1–3 ms on the device and the worst single frames 7–23 ms, against
+16.7 ms per VM frame (two per 33 ms update). Pacing the games at their machines' speed also made
+them far cheaper: Sky & Land II's title loop costs 45 µs at 27 µs/op against 330 µs at 4 µs/op
+before the blit rewrite. If the VM can't keep up, the frame loop is time-boxed (24 ms per update),
+so a heavy stretch runs slower instead of the Playdate dropping to a few updates a second. These
+are estimates; turn on **Show performance** in options for the real figure (VM time per frame,
+its share of the 16.7 ms, instructions per frame, draw time, fps, and a `bench` average of frames
+300–599).
 
 What bbk_playdate learned about the Playdate (slow PSRAM, a cache miss costs about 0.9 µs, an
 8 KB fast stack) shaped the code:
@@ -193,36 +255,43 @@ What bbk_playdate learned about the Playdate (slow PSRAM, a cache miss costs abo
   system calls.
 - **Blits as funnel shifts** with the mode switch outside the inner loop and a fused path for
   plain copies; mirrored blocks alone go pixel by pixel.
-- **Rendering only rows that changed** (a 1,600-byte copy of the last LCD), each byte doubled to
-  16 pixels through a 256-entry table.
+- **Rendering only rows that changed**: the screen is composed into Playdate rows (each byte
+  doubled to 16 pixels through a 256-entry table, or blended / dithered) and only rows that
+  differ from what's on screen are copied and marked.
 - **No copies of data files**: files and open handles share their bytes copy-on-write, so
   New Heroes' Altar's 600 KB data file opened read-write costs nothing until written. Save states
   store such handles as references (about 66 KB a state).
 - **`-Os`** for the device build.
 
 Memory: the VM state is about 200 KB (the 64 KB LAVA address space plus slack and the stack),
-GVmakerSE's fonts 430 KB, and a game's files up to 650 KB (New Heroes' Altar).
+a LavaX pixel screen 25–150 KB, GVmakerSE's fonts 430 KB, and a game's files up to 650 KB (New
+Heroes' Altar).
 
 ## Correctness
 
-`make check` runs `tests/test_states.py` (save-state round trips: play, save, play on, load
-into a fresh VM, replay, compare every frame) and `tests/lockstep.py`, the lockstep test:
+`make check` runs `tests/test_states.py` (save-state round trips, including a LavaX game and a
+paced one: play, save, play on, load into a fresh VM, replay, compare every frame) and
+`tests/lockstep.py`, the lockstep test:
 
-- It drives the five games' own QA routes from wqx_tl (`docs/<game>/routes/`, through each
-  game's `qa.py`), on the English build **and** the Chinese original.
+- It drives all fifteen games' own QA routes from wqx_tl (`docs/<game>/routes/`, through each
+  game's `qa.py`, at the pace each QA uses), on the English build **and** the Chinese original.
+  `--pace 27` reruns them all at the NC3000's pace.
 - Every frame lavaemu runs, the C VM (`host/liblava.dylib` through ctypes) runs the same frame,
-  and the two are compared: all 64 KB of memory (so the LCD and the off-screen buffer),
-  registers, the stack, keys, open files and the whole file table.
+  and the two are compared: all 64 KB of memory (so the LCD and the off-screen buffer), the
+  LavaX pixel planes and colours, registers, the stack, keys, open files and the file table.
 - The QA drivers sometimes reach into the VM between frames (cheats that poke memory, restored
   snapshots); the harness notices a state the C VM didn't produce and copies it across. When a
   Python callback changes the VM inside a frame (Mount Shu's driver releases keys mid-frame)
   the frame is counted as "tainted" and skipped instead.
 
-Result: **0 divergences** in about 507,000 frames (Frog 6k, Ace 99k, New Heroes 117k, Mount Shu
-122k, Sky & Land 164k), with under 0.3% of frames tainted. The harness itself was checked by
-breaking the C VM on purpose (a different rand() increment, a short ClearScreen): it reported
-1,224 divergent frames on two Frog routes. Divergent frames are saved with the state before
-them (`host/lockstep/`), to replay instruction by instruction.
+Result: **0 divergences** in about 1.1 million frames at the QA paces (Sanguo 335k, Sky & Land II
+164k, Mount Shu 122k, New Heroes 117k, Ace 99k, Worms 48k, Sky & Land 45k, Fujia 34k, Pokemon
+31k, Mario 29k, School 26k, WarCraft 20k, Jianghu 17k, Snowman 8k, Frog 6k) and 1.2 million more
+at 27 µs/op, with 0.25% of frames tainted. One Worms route is excluded by design: it patches
+lavaemu's SetGraphMode to fail, to show the game's "needs LavaX 2.0" error. The harness itself
+was checked by breaking the C VM on purpose (a different rand() increment, a short ClearScreen):
+it reported 1,224 divergent frames on two Frog routes. Divergent frames are saved with the state
+before them (`host/lockstep/`), to replay instruction by instruction.
 
 The port mirrors lavaemu down to its Python integer semantics: which addresses are masked to
 16 bits and which aren't, the 16 bytes of slack after memory, GVmaker's font row quirk, the
@@ -252,6 +321,8 @@ Rebuild the translations in wqx_tl with `python3 -m <key>.build` first if they c
 ### Layout
 
 - `src/lava.c`, `lava.h`: the VM. No Playdate dependencies.
+- `src/lavax.c`: LavaX: the pixel screen, ops 0x52–0x74, system calls 0xCB–0xD6.
+- `src/render.c`: the screen as Playdate rows: 2× doubling, flicker blending, grey dithering.
 - `src/profiles.c`: the per-game key profiles and the automatic one.
 - `src/main.c`: the frontend (list, loop, input, options, key view, credits, autotest).
 - `Source/fonts/`: GVmakerSE's GB2312 and ASCII fonts (MIT, with its licence).
@@ -261,13 +332,12 @@ Rebuild the translations in wqx_tl with `python3 -m <key>.build` first if they c
 
 ### Extending
 
-wqx_tl's lavaemu is growing grey-scale (4-level) graphics, newer LavaX system calls and
-per-model screen sizes for games like Princess Maker 4. The VM keeps the screen geometry in
-`LAVA_W/LAVA_H/LAVA_BPL` and the LCD/buffer addresses in one place, and unknown system calls stop
-the game with a message naming the call, so adding them is a matter of new `sys_call` cases.
-Grey levels would render through the frontend's row expansion table, as 2×2 patterns (or
-bbk_playdate's dithering). New translations bundle by adding a line to `tools/bundle.py`; without
-a profile they get the automatic one.
+LavaX's 16-grey and 256-colour modes and bigger screens are implemented and lockstep-tested only
+as far as Worms exercises them (it checks for grey, then plays in black and white); Princess
+Maker 4 and Ragnarok are the next tests. 24- and 32-bit LavaX programs are refused, as in
+lavaemu. Unknown system calls stop the game with a message naming the call. New translations
+bundle by adding a line to `tools/bundle.py` (with their pace); without a profile they get the
+automatic one.
 
 ## Credits
 
@@ -278,8 +348,15 @@ a profile they get the automatic one.
 - **The games**: 蛙蛙大富翁 by Hao Xinli (Computer Frog), DATE Soft Studio, with maps by the
   authors in its map list; 逆转裁判 by Ninja Eric (忍者Eric), JunctionSoft, after Capcom's
   Ace Attorney; 新英雄坛说 by Fanqinlue (反侵略), Summer Loft (避暑阁楼); 蜀山群侠传 by Shi
-  Zehuan (史泽寰), FlySoft (飞翔软件); 幕天席地2：封印之石 by LeeStorm, Molang Team (末浪小组),
-  with mini-games by Yoshinhwa.
+  Zehuan (史泽寰), FlySoft (飞翔软件); 幕天席地 and 幕天席地2：封印之石 by LeeStorm, LastWave
+  (末浪小组), with mini-games by Yoshinhwa; 水管马里奥 by Cloty, Emsky Studio (易码工作室);
+  富甲天下 by You Shunhang (游顺航), Hang'Studio; 三国志 by Bsxy and Lee (LeeSoft), art by Mumu
+  and NBADong; 雪人传奇 by Xu Jiajun (徐佳骏); 魔兽争霸 by Fanqinlue and Shaofan Daotong
+  (烧饭道童); 口袋 (灰度版) by an unnamed author; 中学传奇 by EPC on FantasyDR's engine; 江湖 by
+  JPG Studio (FantasyDR, gameboyLV, pheagle, CreamCake); 百战天虫 by Xiao Qiang (小强).
+  Pokémon, WarCraft, Worms and Mario are trademarks of Nintendo, Blizzard, Team17 and Nintendo.
+- **LavaX**: LeeSoft's LavaX VM (leesoft-mirage/LavaXVM, MIT, (c) 2015 李杰) decides the LavaX
+  ops, calls and drawing, by way of lavaemu.
 - **The English translations**: the wqx_tl project. Their text is drawn in **bbk_tl Sans**, the
   proportional pixel font from the bbk_tl translation project, by small text routines written in
   LAVA bytecode inside each game.
@@ -291,5 +368,6 @@ a profile they get the automatic one.
 
 The code is GPL-3.0-or-later (`LICENSE`), as lavaemu and bbk_playdate are. The games belong to
 their authors; the English versions are unofficial, non-commercial fan translations. Frog
-Monopoly's copyright page asks that the game not be modified without the author's consent; the
-translation is shared as patches by wqx_tl, and this repository contains no game files.
+Monopoly's copyright page asks that the game not be modified without the author's consent, and
+Sky & Land's terms forbid modification and license it only for the Wenquxing and PC; the
+translations are shared as patches by wqx_tl, and this repository contains no game files.

@@ -99,3 +99,32 @@ bench: host/bench
 	  pace=$$(grep '^pace=' $$d/game.txt | cut -d= -f2); \
 	  for p in $$(grep '^program=' $$d/game.txt | cut -d= -f2 | cut -d'|' -f1); do \
 	    host/bench $$d $$p $$pace; done; done
+
+# Mounts the Playdate's data disk over USB, copies the game, ejects and launches it.
+PLAYDATE_PORT ?= $(firstword $(wildcard /dev/cu.usbmodemPD*))
+PLAYDATE_VOLUME ?= /Volumes/PLAYDATE
+
+.PHONY: install device-autotest device-shots
+install: device
+	@test -n "$(PLAYDATE_PORT)" || { echo "No Playdate on USB: connect and unlock it."; exit 1; }
+	$(SDK)/bin/pdutil $(PLAYDATE_PORT) datadisk
+	@for i in $$(seq 30); do test -d $(PLAYDATE_VOLUME)/Games && break; sleep 1; done
+	rm -rf $(PLAYDATE_VOLUME)/Games/$(PRODUCT)
+	cp -R $(PRODUCT) $(PLAYDATE_VOLUME)/Games/
+	diskutil eject $(PLAYDATE_VOLUME)
+	@for i in $$(seq 30); do test -e $(PLAYDATE_PORT) && break; sleep 1; done; sleep 2
+	$(SDK)/bin/pdutil $(PLAYDATE_PORT) run /Games/$(PRODUCT)
+
+# Device build that plays itself (LAVA_AUTOTEST); `make device-shots` then copies its
+# screenshots and log from the data disk to host/device/.
+device-autotest:
+	$(MAKE) clean
+	$(MAKE) device UDEFS=-DLAVA_AUTOTEST
+	$(MAKE) install
+
+device-shots:
+	$(SDK)/bin/pdutil $(PLAYDATE_PORT) datadisk
+	@for i in $$(seq 30); do test -d $(PLAYDATE_VOLUME)/Data && break; sleep 1; done
+	mkdir -p host/device
+	cp -R "$$(ls -d $(PLAYDATE_VOLUME)/Data/*com.gopherbone.lavaemu | head -1)/autotest/." host/device/
+	diskutil eject $(PLAYDATE_VOLUME)
