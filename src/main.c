@@ -781,7 +781,9 @@ static int ring_pos, ring_n;
 static void on_refresh(void* ud, const uint8_t* lcd) {
     (void)ud;
     if (grey_mode == GREY_OFF) return;
-    memcpy(ring[ring_pos], lcd, LAVA_SCREEN_BYTES);
+    // A flicker loop refreshes the same three pictures dozens of times a frame: comparing
+    // reads PSRAM, copying would also write it.
+    if (memcmp(ring[ring_pos], lcd, LAVA_SCREEN_BYTES)) memcpy(ring[ring_pos], lcd, LAVA_SCREEN_BYTES);
     ring_pos = (ring_pos + 1) % 3;
     if (ring_n < 3) ring_n++;
 }
@@ -1859,7 +1861,7 @@ static const AutotestGame autotest_games[] = {
     {"SkyLand2.lav", "~300 shot:seal-title perf0 ~600 perf:seal-title ENTER ~120 shot:seal-menu ENTER ~300 shot:seal-intro ENTER ~300 ENTER ~600 "
                      "shot:seal-prompt y ~90 a ~10 b ~10 c ~10 shot:seal-account ENTER ~60 shot:seal-class ENTER ~60 ENTER ~60 ENTER ~400 "
                      "shot:seal-village F1 ~60 shot:seal-f1 ESC ~60 undock ~4 crank:1 ~10 shot:seal-palette dock "
-                     "border:2 ~60 shot:seal-device border:1 perf:1 ~400 shot:seal-black-perf perf:0 border:0 ~10 stats "
+                     "border:2 ~60 shot:seal-device border:1 overlay:1 ~400 shot:seal-black-perf overlay:0 border:0 ~10 stats "
                      "opts:seal-options keys:seal-keys ~10"},
 };
 
@@ -1932,6 +1934,18 @@ static void autotest_update(void) {
                        : !strcmp(pn, entries[autotest_last_entry].program))
                     autotest_index = (int)i;
             }
+#ifdef AUTOTEST_ONLY
+            // e.g. -DAUTOTEST_ONLY=pokemon.SkyLand2: run only programs whose name appears in the list
+#define AT_STR2(x) #x
+#define AT_STR(x) AT_STR2(x)
+            if (autotest_index >= 0) {
+                char base[64];
+                snprintf(base, sizeof base, "%s", entries[autotest_last_entry].program);
+                char* dot = strrchr(base, '.');
+                if (dot) *dot = 0;
+                if (!strstr(AT_STR(AUTOTEST_ONLY), base)) autotest_index = -1;
+            }
+#endif
             if (autotest_index >= 0) break;
         }
         picker_selected = autotest_last_entry;
@@ -2026,8 +2040,8 @@ static void autotest_update(void) {
         settings.border = atoi(tok + 7);
         needs_redraw = 1;
 
-    } else if (!strncmp(tok, "perf:", 5)) {
-        settings.show_perf = atoi(tok + 5);
+    } else if (!strncmp(tok, "overlay:", 8)) {
+        settings.show_perf = atoi(tok + 8);
         chrome_dirty = 1;
     } else if (!strncmp(tok, "opts:", 5)) {
         opt_selected = OPT_BORDER;

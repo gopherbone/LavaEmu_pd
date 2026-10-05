@@ -13,7 +13,8 @@ frontend. The VM is a port of wqx_tl's `lavaemu`, a Python VM from the MIT-licen
 and MyGVM, and it runs in lockstep with lavaemu on every frame of the translations' QA routes
 ([Correctness](#correctness)).
 
-**Status: works in the Playdate Simulator. Not yet run on a device.**
+**Status: runs on a Playdate.** All fifteen games booted and played their scripted openings on
+the device at 29–30 fps (see [On the device](#on-the-device)); not yet played through by hand.
 
 It comes with fifteen English fan translations from the wqx_tl project, each run at the pace
 of the machine it was written for (see [Pace](#pace)):
@@ -222,6 +223,29 @@ Two kinds of games draw grey on the 1-bit Wenquxing screen:
   screens drawn at 1×. Worms checks for LavaX with SetGraphMode(4) and then plays in black and
   white; grey games aren't bundled yet.
 
+## On the device
+
+`make device-autotest` installs a build that plays a script for every game through the real
+frontend (buttons, crank and chords included) and writes framebuffer screenshots and timings to
+the data disk; `make device-shots` copies them back (a selection is in [docs/device/](docs/device)).
+Measured on the Playdate with the performance counters, per 1/60 s VM frame at the shipped
+paces (two VM frames run per 33 ms update):
+
+| Game / screen | VM time per frame | |
+|---|---|---|
+| Waiting for a key (Three Kingdoms' menus, Ace, Frog) | 0.03–0.08 ms | |
+| Busy bytecode, full 617-op budget (Mount Shu's item screen, School, Jianghu, WarCraft, New Heroes) | 0.3–0.8 ms | |
+| Worms (LavaX pixel screen, TC800 pace) | 1.7 ms average, 4.6 worst | render up to 5.5 ms |
+| Sky & Land II's title animation | 5.8 ms average, 7.1 worst | |
+| Pocket Monsters Grey on the field (flicker loop: ~42 full-screen WriteBlock + Refresh a frame) | 9.7 ms average, 11.0 worst | 10.3 before the blend ring stopped rewriting unchanged pictures |
+| Rendering the screen | 1.1–1.8 ms smoothed, 3–5 ms worst | |
+
+Every game held 29–30 updates a second. The only longer hitches (36–100 ms, once) are games
+writing their save files to flash (Frog's quick save, Mount Shu's new account, Mario's records).
+Compute-bound bytecode costs about 130× the Mac's time on the device, as bbk_playdate's figure
+predicted; Pocket Monsters' blits are bound by PSRAM writes and cost far more than that ratio
+(9.7 ms against 9 µs on the Mac), but still leave headroom.
+
 ## Performance
 
 Measured on an Apple-silicon Mac, single process (`make bench`: each program for a virtual
@@ -239,7 +263,8 @@ every frame of the QA routes, which adds ctypes overhead):
 The device estimate scales by bbk_playdate's own calibration: its fast 6502 core takes 0.080 ms
 per frame on this Mac and 14 ms on a Rev B Playdate on the same workload (about 175×). At the
 shipped paces a busy frame is 1–3 ms on the device and the worst single frames 7–23 ms, against
-16.7 ms per VM frame (two per 33 ms update). Pacing the games at their machines' speed also made
+16.7 ms per VM frame (two per 33 ms update); the device measurements above came in under these
+except for Pocket Monsters' memory-bound blits. Pacing the games at their machines' speed also made
 them far cheaper: Sky & Land II's title loop costs 45 µs at 27 µs/op against 330 µs at 4 µs/op
 before the blit rewrite. If the VM can't keep up, the frame loop is time-boxed (24 ms per update),
 so a heavy stretch runs slower instead of the Playdate dropping to a few updates a second. These

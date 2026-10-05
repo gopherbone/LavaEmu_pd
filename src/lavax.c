@@ -5,6 +5,7 @@
 // and 8 (256 colours).
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "lava_internal.h"
@@ -654,7 +655,7 @@ uint32_t lavax_ext_op(LavaVM* vm, int op, uint32_t pc, uint32_t fb, int32_t* las
         if (f == 0) r = x + y;
         else if (f == 1) r = x - y;
         else if (f == 2) r = x * y;
-        else if (y == 0.0) r = x != 0.0 ? copysign(INFINITY, x) : NAN;   // Python's ZeroDivisionError path
+        else if (y == 0.0) r = x != 0.0 ? copysign((double)INFINITY, x) : (double)NAN;   // Python's ZeroDivisionError path
         else r = x / y;
         v = FB(r);
     } else if (op == 0x62) {
@@ -840,15 +841,15 @@ static int32_t lmath(LavaVM* vm, int32_t n) {
     if (!((n >= 7 && n <= 15) || n == 19)) return 0;
     double x = F(vm->stack[--vm->sp]), r;
     switch (n) {
-    case 7: r = isinf(x) ? NAN : sin(x); break;
-    case 8: r = isinf(x) ? NAN : cos(x); break;
-    case 9: r = isinf(x) ? NAN : tan(x); break;
-    case 10: r = x < -1 || x > 1 ? NAN : asin(x); break;
-    case 11: r = x < -1 || x > 1 ? NAN : acos(x); break;
+    case 7: r = isinf(x) ? (double)NAN : sin(x); break;
+    case 8: r = isinf(x) ? (double)NAN : cos(x); break;
+    case 9: r = isinf(x) ? (double)NAN : tan(x); break;
+    case 10: r = x < -1 || x > 1 ? (double)NAN : asin(x); break;
+    case 11: r = x < -1 || x > 1 ? (double)NAN : acos(x); break;
     case 12: r = atan(x); break;
-    case 13: r = x < 0 ? NAN : sqrt(x); break;
+    case 13: r = x < 0 ? (double)NAN : sqrt(x); break;
     case 14: r = exp(x); break;
-    case 15: r = x <= 0 ? NAN : log(x); break;
+    case 15: r = x <= 0 ? (double)NAN : log(x); break;
     default: r = fabs(x); break;
     }
     return FB(r);
