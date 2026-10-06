@@ -15,8 +15,8 @@ and MyGVM, and it runs in lockstep with lavaemu on every frame of the translatio
 
 **Status: runs on a Playdate.** The first fifteen games booted and played their scripted openings
 on the device at 29–30 fps (see [On the device](#on-the-device)); not yet played through by hand.
-The nine added since (Magic Tower to Power Ski) pass the lockstep test but haven't been run on the
-device yet.
+The nine added since (Magic Tower to Power Ski) pass the lockstep test and have been tried on a Rev B
+Playdate, but haven't been timed there or played through.
 
 It comes with twenty-four English fan translations from the wqx_tl project, each run at the pace
 of the machine it was written for (see [Pace](#pace)):
