@@ -7,6 +7,7 @@
 //   States/<Folder>/<program>-slot<N>.state        save states
 //   Config/<Folder>.txt, settings.txt
 
+#include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -772,6 +773,13 @@ static int palette_sel;           // 0 = Enter (home)
 static float palette_crank;
 static int palette_pressed = -1;  // item held down with A
 static int keyboard_open;
+// The keyboard panel slides in and out: 0 = hidden, 1 = open (kb_shown follows keyboard_open)
+#define KB_SLIDE_S 0.3f            // seconds for the whole slide
+#define KB_SLIDE_FAST 5.0f         // how much faster once a button is pressed mid-slide
+static float kb_shown;
+static int kb_fast;
+static int kb_just_opened;         // the press that opened or closed it doesn't hurry it
+static unsigned int kb_last_ms;
 static int kb_row, kb_col;
 static int kb_pressed;            // key held with A on the keyboard
 static int b_down, b_chorded;
@@ -972,6 +980,9 @@ static void game_add_menu_items(void);
 
 static void open_keyboard(int open) {
     keyboard_open = open;
+    kb_fast = 0;
+    kb_just_opened = 1;
+    kb_last_ms = pd->system->getCurrentTimeMilliseconds();
     kb_pressed = 0;
     needs_redraw = 1;
 }
@@ -999,7 +1010,31 @@ static void on_refresh(void* ud, const uint8_t* lcd) {
     if (ring_n < 3) ring_n++;
 }
 
-static int lcd_y(void) { return keyboard_open ? LCD_Y_KEYBOARD : (tgt_h > 160 ? (240 - tgt_h) / 2 : LCD_Y); }
+// Ease-out (cubic) position of the slide
+static float kb_ease(void) {
+    float u = 1.0f - kb_shown;
+    return 1.0f - u * u * u;
+}
+
+static int lcd_y(void) {
+    int home = tgt_h > 160 ? (240 - tgt_h) / 2 : LCD_Y;
+    return home + (int)((LCD_Y_KEYBOARD - home) * kb_ease() + (LCD_Y_KEYBOARD < home ? -0.5f : 0.5f));
+}
+
+// Moves the slide on; a button pressed mid-slide hurries it. Returns 1 while it moved.
+static int kb_slide(int pushed) {
+    float target = keyboard_open ? 1.0f : 0.0f;
+    if (kb_shown == target) return 0;
+    if (pushed && !kb_just_opened) kb_fast = 1;
+    kb_just_opened = 0;
+    unsigned int now = pd->system->getCurrentTimeMilliseconds();
+    float step = (float)(now - kb_last_ms) / 1000.0f / KB_SLIDE_S * (kb_fast ? KB_SLIDE_FAST : 1.0f);
+    kb_last_ms = now;
+    if (step <= 0.0f) step = 0.001f;
+    if (step > 0.5f) step = 0.5f;           // a long frame (loading) doesn't skip the slide
+    kb_shown = kb_shown < target ? fminf(kb_shown + step, target) : fmaxf(kb_shown - step, target);
+    return 1;
+}
 
 static void compose(void) {
     LavaPx* p = vm->px;
@@ -1061,7 +1096,7 @@ static int dark_border(void) { return settings.border != BORDER_WHITE; }
 // Border around the LCD: white, black, or a Wenquxing-style bezel.
 static void draw_chrome(void) {
     int y0 = lcd_y();
-    if (settings.border == BORDER_DEVICE && !keyboard_open) {
+    if (settings.border == BORDER_DEVICE && kb_shown == 0.0f) {
         pd->graphics->clear(kColorBlack);
         pd->graphics->fillRoundRect(14, 3, 372, 234, 12, (LCDColor)bezel_pattern);
         pd->graphics->drawRoundRect(14, 3, 372, 234, 12, 1, kColorBlack);
@@ -1110,8 +1145,8 @@ static void draw_top_band(void) {
                  (int)(render_ms * 1000.0f + 0.5f), (int)(pd->display->getFPS() + 0.5f), bt);
     }
     int dark = dark_border();
-    if (settings.border == BORDER_DEVICE && !keyboard_open) dark = 0;
-    int y = keyboard_open ? -100 : 8;   // no top band while the keyboard is open
+    if (settings.border == BORDER_DEVICE && kb_shown == 0.0f) dark = 0;
+    int y = kb_shown > 0.0f ? -100 : 8;   // no top band while the keyboard is showing
     if (y < 0) return;
     int dev = settings.border == BORDER_DEVICE;
     pd->graphics->fillRect(dev ? 18 : 0, dev ? 6 : 2, dev ? 364 : 400, dev ? 24 : 30, settings.border == BORDER_DEVICE ? (LCDColor)bezel_pattern
@@ -1176,7 +1211,9 @@ static void draw_palette(void) {
 
 // Keyboard panel under the moved-up LCD.
 static void draw_keyboard(void) {
-    int y0 = 170, rh = 14, cw = 36, x0 = 2;
+    int rh = 14, cw = 36, x0 = 2;
+    int y0 = 170 + (int)((1.0f - kb_ease()) * (240 - 170 + 4) + 0.5f);   // slides up from below
+    if (y0 - 3 >= 240) return;
     pd->graphics->fillRect(0, y0 - 2, 400, 240 - y0 + 2, kColorWhite);
     pd->graphics->drawLine(0, y0 - 3, 400, y0 - 3, 1, kColorBlack);
     for (int r = 0; r < KB_ROWS; r++) {
@@ -1299,6 +1336,7 @@ static void start_game(const Entry* e) {
     palette_sel = 0;
     palette_pressed = -1;
     keyboard_open = 0;
+    kb_shown = 0.0f;
     b_down = b_chorded = 0;
     memset(chord_code, 0, sizeof chord_code);
     memset(dpad_code, 0, sizeof dpad_code);
@@ -1492,7 +1530,8 @@ static void game_update(void) {
     synth_pushed = synth_released = 0;
 #endif
     handle_buttons(cur, pushed, released);
-    if (needs_redraw) {     // the keyboard opened or closed
+    if (kb_slide(pushed)) needs_redraw = 1;
+    if (needs_redraw) {     // the keyboard opened, closed or slid
         needs_redraw = 0;
         draw_chrome();
         chrome_dirty = 1;
@@ -1560,7 +1599,7 @@ static void game_update(void) {
         if (toast_frames == 0) chrome_dirty = 1;
     }
     if (chrome_dirty || settings.show_perf || toast_frames > 0 || b_down) {
-        if (keyboard_open) {
+        if (kb_shown > 0.0f) {
             draw_keyboard();
         } else {
             draw_top_band();
