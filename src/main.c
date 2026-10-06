@@ -252,14 +252,57 @@ static int utf8_chars(const char* s, size_t bytes) {
     return n;
 }
 
-static void text(LCDFont* f, const char* s, int x, int y) {
-    pd->graphics->setFont(f);
-    pd->graphics->drawText(s, utf8_chars(s, strlen(s)), kUTF8Encoding, x, y);
+// The system font's ⬅️➡️⬆️⬇️ are D-pad crosses with one arm filled, too small to tell apart;
+// they're drawn as solid triangles instead (XOR, so they show on light and dark bands).
+static const char* const arrow_seq[4] = {"⬆️", "➡️", "⬇️", "⬅️"};
+#define ARROW_W 13
+
+static int arrow_at(const char* p) {
+    for (int d = 0; d < 4; d++)
+        if (!strncmp(p, arrow_seq[d], strlen(arrow_seq[d]))) return d;
+    return -1;
 }
 
-static int text_w(LCDFont* f, const char* s) {
-    return pd->graphics->getTextWidth(f, s, utf8_chars(s, strlen(s)), kUTF8Encoding, 0);
+static void draw_arrow(int d, int x, int y, int h) {
+    int cy = y + h / 2 + 1, l = x + 1, r = x + 11;
+    switch (d) {
+    case 0: pd->graphics->fillTriangle(l, cy + 4, r, cy + 4, (l + r) / 2, cy - 5, kColorXOR); break;
+    case 2: pd->graphics->fillTriangle(l, cy - 4, r, cy - 4, (l + r) / 2, cy + 5, kColorXOR); break;
+    case 1: pd->graphics->fillTriangle(l + 1, cy - 5, l + 1, cy + 5, r, cy, kColorXOR); break;
+    default: pd->graphics->fillTriangle(r - 1, cy - 5, r - 1, cy + 5, l, cy, kColorXOR); break;
+    }
 }
+
+// Draws (draw = 1) or measures text, with the arrow glyphs as triangles; returns the width.
+static int text_run(LCDFont* f, const char* s, int x, int y, int draw) {
+    pd->graphics->setFont(f);
+    int x0 = x, h = pd->graphics->getFontHeight(f);
+    const char* run = s;
+    const char* p = s;
+    for (;;) {
+        int d = *p ? arrow_at(p) : -1;
+        if (!*p || d >= 0) {
+            if (p > run) {
+                int n = utf8_chars(run, (size_t)(p - run));
+                if (draw) pd->graphics->drawText(run, n, kUTF8Encoding, x, y);
+                x += pd->graphics->getTextWidth(f, run, n, kUTF8Encoding, 0);
+            }
+            if (!*p) break;
+            if (draw) draw_arrow(d, x, y, h);
+            x += ARROW_W;
+            p += strlen(arrow_seq[d]);
+            run = p;
+            continue;
+        }
+        p++;
+    }
+    return x - x0;
+}
+
+static void text(LCDFont* f, const char* s, int x, int y) { text_run(f, s, x, y, 1); }
+static int text_w(LCDFont* f, const char* s) { return text_run(f, s, 0, 0, 0); }
+
+
 
 // `s` cut to `maxw` pixels with an ellipsis.
 static void fit_text(LCDFont* f, const char* s, int maxw, char* out, size_t cap) {
@@ -1038,7 +1081,7 @@ static void draw_top_band(void) {
         for (int d = 0; d < 4; d++) {
             const ProfileKey* k = &profile->chord[d];
             if (!k->code) continue;
-            n += snprintf(t + n, sizeof t - n, "%s%s %s", n ? "   " : "B+", arrows[d], k->label ? k->label : key_name(k->code));
+            n += snprintf(t + n, sizeof t - n, "%s%s %s", n ? "   " : "Ⓑ+", arrows[d], k->label ? k->label : key_name(k->code));
         }
         if (!n) snprintf(t, sizeof t, "Release B for Esc");
     } else if (toast_frames > 0) {
@@ -1700,11 +1743,11 @@ static void keys_draw(void) {
         snprintf(line, sizeof line, "⬆️ %s  ➡️ %s  ⬇️ %s  ⬅️ %s   Ⓐ %s   Ⓑ Esc", dl[0], dl[1], dl[2], dl[3], a);
         text(small_font, line, cx, y);
     } else {
-        text(small_font, "✛ arrows    Ⓐ Enter    Ⓑ (tap) Esc", cx, y);
+        text(small_font, "D-pad: arrows    Ⓐ Enter    Ⓑ (tap) Esc", cx, y);
     }
     y += 20;
     static const char* names[4] = {"⬆️", "➡️", "⬇️", "⬅️"};
-    text(small_font, "Ⓑ held + ✛", 12, y);
+    text(small_font, "Ⓑ held +", 12, y);
     int n = 0;
     for (int d = 0; d < 4; d++) {
         const ProfileKey* k = &profile->chord[d];
