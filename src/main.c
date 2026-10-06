@@ -850,6 +850,9 @@ static void live_apply_(void) {
         return;
     }
     live_on = 1;
+    // Whenever the game reads Y (a Yes prompt, a "buy? y"), Ⓐ answers Yes; Enter stays
+    // on the crank palette
+    if (live.keys['y'] && !profile->a_key.code) live_a = 'y';
     if (live_n > 2 || live.open) return;
     // A Yes/No prompt that doesn't read arrows: Yes and No on the D-pad (and on A and B
     // when the game doesn't read Enter and Esc). Other small sets only lead the palette:
@@ -858,8 +861,7 @@ static void live_apply_(void) {
     if (dpad_free && live_n == 2 && live_list[0] == 'y' && live_list[1] == 'n') live_left = 'y', live_right = 'n';
     // A and B only take Yes and No: a screen that waits for any key and checks one secret
     // letter would otherwise turn A into that letter
-    int yes = live_list[0] == 'y', no = live_n == 2 ? live_list[1] == 'n' : live_list[0] == 'n';
-    if (yes && !live.keys[LK_ENTER] && !profile->a_key.code) live_a = 'y';
+    int no = live_n == 2 ? live_list[1] == 'n' : live_list[0] == 'n';
     if (no && !live.keys[LK_ESC]) live_b = 'n';
 }
 
@@ -907,6 +909,7 @@ static void palette_build(void) {
     uint8_t used[128] = {0};
     int home = a_key();
     if (home < 128) used[home] = 1;
+    if (live_a) pal_codes[n] = LK_ENTER, pal_labels[n] = "Enter", used[LK_ENTER] = 1, n++;
     for (int i = 0; i < live_n && n < 60; i++) {
         int c = live_list[i];
         if (used[c]) continue;
@@ -1151,7 +1154,7 @@ static void draw_palette(void) {
         if (palette_is_live(i)) pd->graphics->fillEllipse(x + 4, y + 4, 5, 5, 0.0f, 0.0f, sel ? bgc : fg);
         if (sel != inv_bg) pd->graphics->setDrawMode(kDrawModeFillWhite);
         pd->graphics->setClipRect(x + 2, y, cw - 4, h);
-        const char* kn = code == LK_ENTER ? "Ⓐ" : code > 0 ? key_name(code) : "every key";
+        const char* kn = i == 0 ? "Ⓐ" : code > 0 ? key_name(code) : "every key";
         int two = strcmp(kn, label) != 0;
         int w = text_w(small_font, label);
         text(small_font, label, x + (cw - w) / 2, two ? y + 2 : y + 9);

@@ -192,12 +192,12 @@ screen changes. Nothing here touches the VM's state (the lockstep test runs with
 
 What it drives:
 
-- **Yes/No prompts.** When the live set is exactly Yes and No and the game isn't reading the
-  arrows, ⬅️ sends Y and ➡️ sends N, Ⓐ sends Y if the game doesn't read Enter there, Ⓑ sends N
-  if it doesn't read Esc, and the top band says so: `⬅️ Yes   No ➡️    Ⓐ Yes   Ⓑ No`. Only
-  Yes/No are put on the buttons: other small sets could come from a screen that waits for
-  any key and checks one secret letter, where remapping Ⓐ would change what the game does.
-  Whenever the game reads arrows, they stay arrows.
+- **Yes/No prompts.** Whenever the game is reading Y, Ⓐ sends Yes (Enter moves onto the crank
+  palette). When the live set is exactly Yes and No and the game isn't reading the arrows,
+  ⬅️ sends Y and ➡️ sends N, and Ⓑ sends N if the game doesn't read Esc there. The top band
+  says so: `◀ Yes   No ▶    Ⓐ Yes   Ⓑ No`. Only Yes/No are put on the buttons: other small
+  sets could come from a screen that waits for any key and checks one secret letter. Whenever
+  the game reads arrows, they stay arrows.
 - **The palette leads with the live keys** (marked with a dot), labelled from the profile, then
   the rest of the profile. A set of more than 8 keys isn't specific, and the profile leads.
 - **Text fields open the keyboard panel** (Options → Auto keyboard, on by default). A field is
