@@ -784,8 +784,11 @@ static int chrome_dirty;          // border bands need redrawing
 //
 // What the game is reading right now (src/live.c), debounced: a set must hold
 // for LIVE_DEBOUNCE VM frames before the UI follows it, so hints don't flicker.
-#define LIVE_WINDOW 15              // VM frames (1/4 s) of read sites
-#define LIVE_DEBOUNCE 6
+// Both grow with the game's pace: at a real machine's 27 us/op a game runs 7x fewer
+// instructions a frame, so loops that poll between longer stretches of work come back to
+// their key reads less often (tests/lockstep.py --live --pace 27 measured it).
+#define LIVE_WINDOW (15 + game_pace / 2)       // VM frames: 0.28 s at 4 us/op, 0.47 s at 27
+#define LIVE_DEBOUNCE (6 + game_pace / 9)      // 0.1 s at 4 us/op, 0.15 s at 27
 #define LIVE_MAX_SPECIFIC 8         // more live keys than this: not specific, the profile leads
 
 static LiveSet live_cand, live;     // candidate and shown sets

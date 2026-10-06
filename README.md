@@ -186,9 +186,13 @@ return addresses above it, and every key it tests with CheckKey(k). `src/live.c`
 bytecode after each read site, and after the callers it returns to, for the comparisons made on
 the key that was read: `getchar; store v; ... ld8 v; eqi 'y'`, `call getkey; nei 27`, a chain of
 those in a switch. It keeps to the one variable that received the key, so counters compared
-with 13 or 20 nearby don't count. The union over the last quarter second (15 VM frames) is the
-live set, and the UI follows it once it has held for 6 frames, so hints don't flicker while a
-screen changes. Nothing here touches the VM's state (the lockstep test runs with it on).
+with 13 or 20 nearby don't count. The union over a short window is the live set, and the UI
+follows it once it has held for a few frames, so hints don't flicker while a screen changes.
+Both scale with the game's pace, since at a real machine's 27 µs/op a game runs 7× fewer
+instructions a frame and polling loops come back to their key reads less often: the window is
+15 + pace/2 VM frames (0.28 s at 4 µs/op, 0.47 s at 27) and the debounce 6 + pace/9 frames
+(0.1 s and 0.15 s). Measured with `--live --pace 27`, this halves the moments a screen's keys
+drop out compared with a fixed quarter second. Nothing here touches the VM's state (the lockstep test runs with it on).
 
 What it drives:
 

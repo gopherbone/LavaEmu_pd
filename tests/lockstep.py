@@ -202,7 +202,9 @@ GAMES = ["frog", "ace", "newhero", "shushan", "seal", "skyland", "mario", "fujia
 
 NAMES = {13: "Enter", 14: "PgDn", 18: "Caps", 19: "PgUp", 20: "Up", 21: "Down", 22: "Right", 23: "Left", 25: "Help",
          26: "Shift", 27: "Esc", 28: "F1", 29: "F2", 30: "F3", 31: "F4", 32: "Space"}
-DEBOUNCE = 6
+# as the frontend: both scale with the pace (overridable for experiments)
+DEBOUNCE = int(os.environ.get("LIVE_DEBOUNCE", 0))
+WINDOW = int(os.environ.get("LIVE_WINDOW", 0))
 
 
 def kname(k):
@@ -212,13 +214,14 @@ def kname(k):
 def live_frame(vm, cv):
     """The frontend's debounce: a set must hold DEBOUNCE frames to be shown."""
     st = S.live_state.setdefault(id(vm), {"cand": None, "n": 0, "shown": None})
-    keys, info = cv.live(15)
+    pace = cv.pace()
+    keys, info = cv.live(WINDOW or 15 + pace // 2)
     sig = (frozenset(keys), info["text"], info["open"])
     if sig == st["cand"]:
         st["n"] += 1
     else:
         st["cand"], st["n"] = sig, 1
-    if st["n"] == DEBOUNCE and sig != st["shown"]:
+    if st["n"] == (DEBOUNCE or 6 + pace // 9) and sig != st["shown"]:
         st["shown"] = sig
         n = len(S.live)
         label = S.label
@@ -332,7 +335,7 @@ def main(argv):
     if S.live is not None:
         import json
         rows = [dict(label=l, frame=f, keys=[kname(k) for k in ks], **info, shot=sh) for l, f, ks, info, sh in S.live]
-        with open(os.path.join(lavac.ROOT, "host", f"live_{'_'.join(games)}.json"), "w") as f:
+        with open(os.environ.get("LIVE_OUT") or os.path.join(lavac.ROOT, "host", f"live_{'_'.join(games)}.json"), "w") as f:
             json.dump(rows, f, indent=0)
         print(f"live: {len(rows)} changes")
     if S.timing is not None:
