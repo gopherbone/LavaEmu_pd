@@ -833,6 +833,7 @@ static const char* pal_labels[64];
 static int pal_n, live_shown;
 
 static void live_apply_(void);
+static int profile_a(void);
 static void live_apply(void) {
     int keep = palette_sel ? palette_code(palette_sel) : 0;
     live_apply_();
@@ -863,7 +864,7 @@ static void live_apply_(void) {
     live_on = 1;
     // Whenever the game reads Y (a Yes prompt, a "buy? y"), Ⓐ answers Yes; Enter stays
     // on the crank palette
-    if (live.keys['y'] && !profile->a_key.code) live_a = 'y';
+    if (live.keys['y'] && !profile_a()) live_a = 'y';
     if (live_n > 2 || live.open) return;
     // A Yes/No prompt that doesn't read arrows: Yes and No on the D-pad (and on A and B
     // when the game doesn't read Enter and Esc). Other small sets only lead the palette:
@@ -909,9 +910,17 @@ static void live_reset(void) {
     live_apply();
 }
 
+// The profile's A key, or 0 (Enter). An a_live key (Phantom Fighter's Fire, Billiards'
+// Space) only while the game is reading it, so Enter still chooses menu items.
+static int profile_a(void) {
+    int c = profile->a_key.code;
+    if (c && profile->a_live && !(settings.live_keys && live.known && !live.text && c < 128 && live.keys[c])) return 0;
+    return c;
+}
+
 static int a_key(void) {
     if (live_a) return live_a;
-    return profile->a_key.code ? profile->a_key.code : LK_ENTER;
+    return profile_a() ? profile_a() : LK_ENTER;
 }
 
 // The palette: Ⓐ's key (home), the keys the game reads now, the profile's keys, Keyboard.
@@ -948,7 +957,7 @@ static int palette_is_live(int i) { return i >= 1 && i <= live_shown; }
 static const char* palette_label(int i) {
     if (i == 0) {
         if (live_a) return key_label(live_a);
-        return profile->a_key.code ? (profile->a_key.label ? profile->a_key.label : key_name(a_key())) : "Enter";
+        return profile_a() ? (profile->a_key.label ? profile->a_key.label : key_name(a_key())) : "Enter";
     }
     if (i <= pal_n) return pal_labels[i - 1];
     return "Keyboard";
@@ -1784,7 +1793,8 @@ static void keys_draw(void) {
     if (profile->dpad[0] || profile->dpad[1] || profile->dpad[2] || profile->dpad[3] || profile->a_key.code) {
         char a[24], dl[4][12];
         for (int d = 0; d < 4; d++) snprintf(dl[d], sizeof dl[d], "%s", key_name(dpad_key(d)));
-        snprintf(a, sizeof a, "%s", profile->a_key.label ? profile->a_key.label : key_name(a_key()));
+        const char* al = profile->a_key.label ? profile->a_key.label : key_name(profile->a_key.code);
+        snprintf(a, sizeof a, profile->a_live ? "%s/Enter" : "%s", al);
         snprintf(line, sizeof line, "⬆️ %s  ➡️ %s  ⬇️ %s  ⬅️ %s   Ⓐ %s   Ⓑ Esc", dl[0], dl[1], dl[2], dl[3], a);
         text(small_font, line, cx, y);
     } else {

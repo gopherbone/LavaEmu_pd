@@ -110,8 +110,8 @@ static const Profile profiles[] = {
     {"huanying", "Phantom Fighter",
      {K('p', "Pause"), K(LK_ENTER, "Enter (choose)"), K('z', "Start stage +1"), NONE},
      {K(LK_ENTER, "Enter (choose)"), K('p', "Pause"), K('z', "Start stage +1")},
-     3, "A fires (the game's A key); menu items are chosen with Enter: B + right, or the palette.",
-     {0, 0, 0, 0}, K('a', "Fire")},
+     3, "In flight A fires (the game's A key); in the menus it's Enter.",
+     {0, 0, 0, 0}, K('a', "Fire"), 0, 1},
     {"mofa", "Magic Blocks",
      {K('y', "Yes (save keys)"), NONE, NONE, NONE},
      {K('y', "Yes (save keys)")},
@@ -120,9 +120,9 @@ static const Profile profiles[] = {
      {K(LK_ENTER, "Enter"), K('p', "Speed settings"), K('y', "Yes"), K('n', "No")},
      {K(LK_ENTER, "Enter"), K(LK_PGUP, "Turbo aim (hold)"), K('p', "Speed settings"), K('y', "Yes"),
       K('n', "No"), K(LK_F2, "Delete")},
-     6, "Hold A to charge a shot (Space), let go to strike; menus take Enter on B + up or the palette. "
+     6, "At the table hold A to charge a shot (Space), let go to strike; in the menus A is Enter. "
         "Turbo (PgUp at first) is held from the palette while the D-pad aims.",
-     {0, 0, 0, 0}, K(LK_SPACE, "Charge / shoot")},
+     {0, 0, 0, 0}, K(LK_SPACE, "Charge / shoot"), 0, 1},
     {"huaxue", "Power Ski",
      {K('q', "Stunt Q"), K('w', "Stunt W"), K('e', "Stunt E"), K('a', "Stunt A")},
      {K('q', "Stunt Q"), K('w', "Stunt W"), K('e', "Stunt E"), K('a', "Stunt A"), K('s', "Stunt S"),

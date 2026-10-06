@@ -152,9 +152,9 @@ What the chords and the palette send in each game (from the key view, Options �
 | Legend of the Brave | Restart level (F1) | Restart level |
 | Rush Out the Tunnel | –, Bomb (X), Yes, Pause (Z) | Bomb, Pause, Yes, Space, F2 |
 | Tetris, Diamond Blocks | Clock (F1, hold), Yes | Clock, Yes, Delete (F2) |
-| Phantom Fighter | Pause, Enter (choose), Start stage +1 (Z) | Enter, Pause, Start stage +1. **Ⓐ fires (A)**; menus take Enter from the chord |
+| Phantom Fighter | Pause, Enter (choose), Start stage +1 (Z) | Enter, Pause, Start stage +1. **Ⓐ fires (A) in flight** and is Enter in the menus (it follows the live keys) |
 | Magic Blocks | Yes (save keys) | Yes |
-| Billiards Master | Enter, Speed settings (P), Yes, No | Enter, Turbo aim (PgUp, hold), Speed, Yes, No, Delete. **Hold Ⓐ to charge a shot (Space)** |
+| Billiards Master | Enter, Speed settings (P), Yes, No | Enter, Turbo aim (PgUp, hold), Speed, Yes, No, Delete. **At the table, hold Ⓐ to charge a shot (Space)**; in the menus Ⓐ is Enter (it follows the live keys) |
 | Power Ski | Stunts Q, W, E, A | Stunts Q W E A S D, Status (Help) |
 | any other game | F1–F4 | every key its code compares a key against |
 

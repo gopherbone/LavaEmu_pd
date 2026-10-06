@@ -24,6 +24,7 @@ typedef struct {
     uint8_t dpad[4];        // keys the D-pad sends (up, right, down, left); 0 = the arrows
     ProfileKey a_key;       // what A sends; code 0 = Enter
     uint8_t min_hold;       // VM frames a tap stays down at least (games that poll slowly)
+    uint8_t a_live;         // A sends a_key only while the game reads it (live keys), Enter otherwise
 } Profile;
 
 const Profile* profile_find(const char* id);
