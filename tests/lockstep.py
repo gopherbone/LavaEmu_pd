@@ -53,6 +53,7 @@ class Stats:
         self.max_div = 5
         self.keys = None          # --keys: {game: {(kind, value): count}}
         self.timing = None        # --timing: {label: [seconds per C frame]}
+        self.live = None          # --live: log of debounced live key sets
 
 
 S = Stats()
@@ -150,6 +151,8 @@ def run_frames(self, n=1):
         if S.timing is not None:
             S.timing.setdefault(S.label, []).append(time.perf_counter() - t_c)
         S.frames += 1
+        if S.live is not None:
+            live_frame(self, cv)
         if S.keys is not None:
             g = S.keys.setdefault(S.label.split()[0], {})
             for kind, v in cv.probes():
@@ -195,6 +198,37 @@ def route_names(game):
 
 GAMES = ["frog", "ace", "newhero", "shushan", "seal", "skyland", "mario", "fujia", "sanguo", "snowman", "warcraft",
          "pokemon", "school", "jianghu", "worms"]
+
+
+NAMES = {13: "Enter", 14: "PgDn", 18: "Caps", 19: "PgUp", 20: "Up", 21: "Down", 22: "Right", 23: "Left", 25: "Help",
+         26: "Shift", 27: "Esc", 28: "F1", 29: "F2", 30: "F3", 31: "F4", 32: "Space"}
+DEBOUNCE = 6
+
+
+def kname(k):
+    return NAMES.get(k) or chr(k).upper()
+
+
+def live_frame(vm, cv):
+    """The frontend's debounce: a set must hold DEBOUNCE frames to be shown."""
+    st = S.live_state.setdefault(id(vm), {"cand": None, "n": 0, "shown": None})
+    keys, info = cv.live(15)
+    sig = (frozenset(keys), info["text"], info["open"])
+    if sig == st["cand"]:
+        st["n"] += 1
+    else:
+        st["cand"], st["n"] = sig, 1
+    if st["n"] == DEBOUNCE and sig != st["shown"]:
+        st["shown"] = sig
+        n = len(S.live)
+        label = S.label
+        shot = os.path.join(OUT, "live", f"{label.replace(' ', '_')}_{n:04d}.png")
+        os.makedirs(os.path.dirname(shot), exist_ok=True)
+        try:
+            vm.screenshot(shot, 1)
+        except Exception:
+            shot = ""
+        S.live.append((label, vm.frame, sorted(keys), info, shot))
 
 
 # Routes that change the Python VM's own code (so the C VM can't follow them)
@@ -269,6 +303,9 @@ def main(argv):
         S.keys = {}
     if "--timing" in argv:
         S.timing = {}
+    if "--live" in argv:
+        S.live = []
+        S.live_state = {}
     import contextlib
     import io
     total_fail = 0
@@ -292,6 +329,12 @@ def main(argv):
                 print(f"    (expected: {KNOWN[label]})")
                 del S.divs[d0:]
             total_fail += len(S.divs) - d0
+    if S.live is not None:
+        import json
+        rows = [dict(label=l, frame=f, keys=[kname(k) for k in ks], **info, shot=sh) for l, f, ks, info, sh in S.live]
+        with open(os.path.join(lavac.ROOT, "host", f"live_{'_'.join(games)}.json"), "w") as f:
+            json.dump(rows, f, indent=0)
+        print(f"live: {len(rows)} changes")
     if S.timing is not None:
         # host time of the C VM per frame; device estimate x175 (bbk_playdate's fast core:
         # 0.080 ms/frame on this kind of Mac, 14 ms on a Rev B Playdate)

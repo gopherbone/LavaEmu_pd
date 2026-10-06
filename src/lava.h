@@ -78,6 +78,13 @@ typedef struct {
     void (*on_refresh)(void* ud, const uint8_t* lcd);
 } LavaHost;
 
+// Where the program last read keys (for the frontend's live key hints; not VM state)
+#define LAVA_READ_SITES 8
+typedef struct {
+    uint32_t pc, ret0, ret1;    // the read op, and the return addresses of its function and the caller
+    int32_t frame;
+} LavaReadSite;
+
 // LavaX's pixel screen: one byte a pixel, `w` x `h`, outside LAVA RAM.
 // Mode 1: 0/1; mode 4: 0 (white) .. 15 (black); mode 8: palette indices.
 typedef struct LavaPx {
@@ -140,6 +147,9 @@ typedef struct LavaVM {
     void (*key_probe)(struct LavaVM* vm, int kind, int value);
     int32_t last_key;           // value returned by the last getchar/Inkey/GetWord/CheckKey(128)
     int32_t sys_since_key;      // system calls since then
+    LavaReadSite reads[LAVA_READ_SITES];
+    int32_t checked[128];       // frame + 1 when CheckKey(k) last tested k
+    int32_t classified;         // frame + 1 when isalpha/isdigit/... last tested a key just read
 
     int32_t stack_base[16];     // underflow slack
     int32_t stack[LAVA_STACK_MAX];

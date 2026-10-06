@@ -209,3 +209,12 @@ void lh_px_set(Host* h, int present, int w, int hh, int mode, int bg, int fg, in
     if (has_pal && pal) memcpy(p->pal, pal, sizeof p->pal);
     v->px = p;
 }
+
+#include "../src/live.h"
+// Live key set over the last `window` frames: keys[128], then count, open, arrows, known.
+void lh_live(Host* h, int window, uint8_t* keys, int32_t* info) {
+    LiveSet s;
+    live_compute(&h->vm, window, &s);
+    memcpy(keys, s.keys, 128);
+    info[0] = s.count, info[1] = s.open, info[2] = s.arrows, info[3] = s.known, info[4] = s.text;
+}

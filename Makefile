@@ -33,7 +33,7 @@ $(error SDK path not found; set ENV value PLAYDATE_SDK_PATH)
 endif
 
 VPATH += src
-SRC = src/main.c src/lava.c src/lavax.c src/profiles.c src/render.c
+SRC = src/main.c src/lava.c src/lavax.c src/live.c src/profiles.c src/render.c
 UINCDIR = src
 
 include $(SDK)/C_API/buildsupport/common.mk
@@ -70,9 +70,9 @@ games:
 	python3 tools/bundle.py --wqx-tl $(WQX_TL) $(if $(ORIGINALS),--originals) games
 
 HOST_CC = $(if $(filter Darwin,$(shell uname -s)),xcrun cc,cc)
-host/liblava.dylib: src/lava.c src/lavax.c src/lava.h src/lava_internal.h tools/lavahost.c
+host/liblava.dylib: src/lava.c src/lavax.c src/lava.h src/lava_internal.h src/live.c tools/lavahost.c
 	@mkdir -p host
-	$(HOST_CC) -O2 -Wall -Wextra -Wno-unused-parameter -shared -fPIC -o $@ src/lava.c src/lavax.c tools/lavahost.c
+	$(HOST_CC) -O2 -Wall -Wextra -Wno-unused-parameter -shared -fPIC -o $@ src/lava.c src/lavax.c src/live.c tools/lavahost.c
 
 host: host/liblava.dylib
 

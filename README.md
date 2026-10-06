@@ -42,20 +42,24 @@ of the machine it was written for (see [Pace](#pace)):
 | ![Game list](docs/game-list.png) | ![Frog Monopoly with the crank palette open](docs/frog-palette.png) |
 | ![Ace Attorney in court](docs/ace-court.png) | ![New Heroes' Altar on the map](docs/newhero-map.png) |
 | ![Heroes of Mount Shu: Items, opened with the B + right chord](docs/shushan-items.png) | ![Sky & Land II: the F1 menu](docs/seal-f1.png) |
-| ![Typing an account name on the keyboard panel](docs/shushan-keyboard.png) | ![Sky & Land II on the Device border](docs/seal-device.png) |
-| ![Chord hints while B is held](docs/frog-chords.png) | ![The key view for Sky & Land II](docs/seal-keys.png) |
+| ![The keyboard panel opened by itself on a text field](docs/shushan-keyboard.png) | ![Sky & Land II on the Device border](docs/seal-device.png) |
+| ![A Yes/No prompt: Yes and No on the D-pad and A/B](docs/shushan-yn.png) | ![The palette leads with the keys the game reads now (dots)](docs/shushan-yn-palette.png) |
+| ![The key view for Sky & Land II](docs/seal-keys.png) | ![Options: live key hints and auto keyboard](docs/seal-options.png) |
 | ![Pocket Monsters Grey: flicker grey blended into a dither](docs/pokemon-dither.png) | ![Worms, a LavaX game](docs/worms.png) |
 | ![Mario Pipes](docs/mario-play.png) | ![WarCraft](docs/warcraft.png) |
 
 More in [docs/](docs): every game's title, the palettes, options, the performance overlay,
 credits, and a Chinese original running on the VM's own fonts.
 
-- The 160×80 LCD is drawn at 2× (320×160), with a white, black or Device border.
+- The 160×80 LCD is drawn at 2× (320×160), with a black (default), white or Device border.
 - LavaX programs (LeeSoft's later VM, for the TC800 and PC emulators) run too: their pixel
   screen in 2-colour, 16-grey or 256-colour mode, floats and the newer system calls.
 - Games that make grey by flickering two pictures get it blended back into a dither.
 - Game saves (the games' own save files) go to the Data folder as they are written; 3
   save-state slots per game.
+- Live key hints: LavaEmu watches which keys the game is reading right now. A Yes/No prompt
+  puts Yes and No on the D-pad (and A/B), the crank palette leads with the keys the screen
+  asks for, and a text field opens the keyboard panel by itself.
 - Per-game key profiles: B + D-pad chords and a crank key palette, labelled with what the keys
   do in that game. An on-screen keyboard has every key, for names and passwords.
 - Games you add get an automatic key profile from a scan of their bytecode.
@@ -111,14 +115,14 @@ bundled one, so deleting `Saves/<Name>` starts the game fresh.
 | Ⓑ held + D-pad | four game keys per game, shown above the screen while B is held |
 | Crank out | the key palette: a reel of the game's keys under the screen. Turn to pick, Ⓐ presses |
 | Menu → **keyboard** | every key, in a panel under the (moved-up) screen |
-| Menu → **options** | save/load state, slot, border, speed, machine pace, flicker grey, performance overlay, key view, reset |
+| Menu → **options** | save/load state, slot, border, speed, machine pace, flicker grey, live key hints, auto keyboard, performance overlay, key view, reset |
 | Menu → **game list** | back to the list |
 
 What the chords and the palette send in each game (from the key view, Options → Keys):
 
 | Game | Ⓑ + ⬆️ ➡️ ⬇️ ⬅️ | Palette |
 |---|---|---|
-| Frog Monopoly | Discard card, Next tab, Quick save, Prev tab | Next/Prev tab, Discard, Yes, No, Back, Quick save, Quick load, Quit menu, Help |
+| Frog Monopoly | Yes, Next tab, No, Prev tab | Yes, No, Next/Prev tab, Discard (F2/P), Quick save, Quick load, Prev tab / Quit (Q), Next tab (W), Back, Help |
 | Ace Attorney | Court Record | Court Record |
 | New Heroes' Altar | Yes, –, No, – | Yes, No, Challenge, Kill, Head/Body/Hand/Feet off, Reset keys |
 | Heroes of Mount Shu | Gear, Items, Status, Arts (F1–F4) | Gear, Items / Del, Status, Arts, Points, Yes, No, Caps, Shift |
@@ -173,6 +177,47 @@ page. Two of the games need text entry: account names, and a password in Mount S
    back to **Enter**, so Ⓐ is Enter again for the next menu and the next press of a palette
    key is one notch away. Docking closes it. The reel's last item opens the **keyboard**
    panel, with every LAVA key for typing names, which is also in the system menu.
+
+### Live keys
+
+The profiles are the same on every screen, but a game asks for different keys on each. So the
+VM notes every place a game reads a key (getchar, Inkey, GetWord, CheckKey(128)) with the two
+return addresses above it, and every key it tests with CheckKey(k). `src/live.c` scans the
+bytecode after each read site, and after the callers it returns to, for the comparisons made on
+the key that was read: `getchar; store v; ... ld8 v; eqi 'y'`, `call getkey; nei 27`, a chain of
+those in a switch. It keeps to the one variable that received the key, so counters compared
+with 13 or 20 nearby don't count. The union over the last quarter second (15 VM frames) is the
+live set, and the UI follows it once it has held for 6 frames, so hints don't flicker while a
+screen changes. Nothing here touches the VM's state (the lockstep test runs with it on).
+
+What it drives:
+
+- **Yes/No prompts.** When the live set is exactly Yes and No and the game isn't reading the
+  arrows, ⬅️ sends Y and ➡️ sends N, Ⓐ sends Y if the game doesn't read Enter there, Ⓑ sends N
+  if it doesn't read Esc, and the top band says so: `⬅️ Yes   No ➡️    Ⓐ Yes   Ⓑ No`. Only
+  Yes/No are put on the buttons: other small sets could come from a screen that waits for
+  any key and checks one secret letter, where remapping Ⓐ would change what the game does.
+  Whenever the game reads arrows, they stay arrows.
+- **The palette leads with the live keys** (marked with a dot), labelled from the profile, then
+  the rest of the profile. A set of more than 8 keys isn't specific, and the profile leads.
+- **Text fields open the keyboard panel** (Options → Auto keyboard, on by default). A field is
+  recognised by range tests over letters or digits (`key >= 'a' && key <= 'z'`), isalpha-style
+  calls on the key, 12+ letters and digits compared at once, or the editing keys the engines
+  use: Caps, Shift and F2 (delete) together, or Enter and Left (backspace) without the other
+  arrows; range tests only count where a delete key (F2, or Left without Right) is offered,
+  so menus that range-check a few hotkeys don't open it. The panel closes when the field
+  ends; closing it by hand keeps it closed until the next field.
+- When nothing specific is being read (a game polling raw key state, or waiting for any key),
+  the static profile applies as before. **Options → Live key hints** turns it all off.
+
+Checked with `tests/lockstep.py --live` (logs each debounced change with a screenshot;
+`tools/livesheet.py` makes contact sheets) over every QA route. The keyboard opens on Mount
+Shu's registration and login, both Sky & Lands' account names, High School Legend's name,
+Frog's Hall of Fame name and number pad, Mario's record name and Jianghu's diary, and not on
+Millionaire's number keys, Mario's W/A/S/D or any map screen. Yes/No goes on the D-pad on
+Frog's and New Heroes' Y/N prompts and Mount Shu's confirm and shop prompts. One false
+positive is known: a High School Legend cutscene that polls F1–F4 with range tests opens the
+keyboard briefly.
 
 **Alternatives tried or considered:**
 

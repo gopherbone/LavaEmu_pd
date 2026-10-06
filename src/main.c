@@ -17,10 +17,12 @@
 #include "lava.h"
 #include "profiles.h"
 #include "render.h"
+#include "live.h"
 
 static PlaydateAPI* pd;
 static LCDFont* font;        // Asheville Sans 14 Bold
 static LCDFont* small_font;  // Roobert 10 Bold
+static LCDFont* mid_font;    // Roobert 11 Bold
 
 #define REFRESH_RATE 30
 #define STATE_SLOTS 3
@@ -166,9 +168,11 @@ typedef struct {
     int border;
     int show_perf;
     int speed;          // 1, 2 or 4
+    int auto_kb;        // open the keyboard panel when a game asks for typed text
+    int live_keys;      // live key hints (surface what the game is reading now)
 } Settings;
 
-static Settings settings = {BORDER_WHITE, 0, 1};
+static Settings settings = {BORDER_BLACK, 0, 1, 1, 1};
 
 static void apply_setting(const char* key, const char* value, void* ud) {
     (void)ud;
@@ -176,12 +180,14 @@ static void apply_setting(const char* key, const char* value, void* ud) {
     if (!strcmp(key, "border")) settings.border = v >= 0 && v < BORDER_COUNT ? v : BORDER_WHITE;
     else if (!strcmp(key, "show_perf")) settings.show_perf = v != 0;
     else if (!strcmp(key, "speed")) settings.speed = v == 2 || v == 4 ? v : 1;
+    else if (!strcmp(key, "auto_kb")) settings.auto_kb = v != 0;
+    else if (!strcmp(key, "live_keys")) settings.live_keys = v != 0;
 }
 
 static void save_settings(void) {
-    char buf[96];
-    int n = snprintf(buf, sizeof buf, "border=%d\nshow_perf=%d\nspeed=%d\n", settings.border, settings.show_perf,
-                     settings.speed);
+    char buf[128];
+    int n = snprintf(buf, sizeof buf, "border=%d\nshow_perf=%d\nspeed=%d\nauto_kb=%d\nlive_keys=%d\n", settings.border,
+                     settings.show_perf, settings.speed, settings.auto_kb, settings.live_keys);
     write_file("settings.txt", (uint8_t*)buf, n);
 }
 
@@ -253,6 +259,20 @@ static void text(LCDFont* f, const char* s, int x, int y) {
 
 static int text_w(LCDFont* f, const char* s) {
     return pd->graphics->getTextWidth(f, s, utf8_chars(s, strlen(s)), kUTF8Encoding, 0);
+}
+
+// `s` cut to `maxw` pixels with an ellipsis.
+static void fit_text(LCDFont* f, const char* s, int maxw, char* out, size_t cap) {
+    snprintf(out, cap, "%s", s);
+    if (text_w(f, out) <= maxw) return;
+    size_t n = strlen(out);
+    while (n > 0) {
+        n--;
+        while (n > 0 && ((unsigned char)out[n] & 0xC0) == 0x80) n--;   // whole UTF-8 characters
+        while (n > 0 && out[n - 1] == ' ') n--;
+        snprintf(out + n, cap - n, "…");
+        if (text_w(f, out) <= maxw) return;
+    }
 }
 
 // Word-wrapped text; returns the y after the last line.
@@ -717,21 +737,163 @@ static int dpad_code[4];          // key sent by each held direction
 static int a_code;
 static int chrome_dirty;          // border bands need redrawing
 
-static int a_key(void) { return profile->a_key.code ? profile->a_key.code : LK_ENTER; }
+// MARK: Live keys
+//
+// What the game is reading right now (src/live.c), debounced: a set must hold
+// for LIVE_DEBOUNCE VM frames before the UI follows it, so hints don't flicker.
+#define LIVE_WINDOW 15              // VM frames (1/4 s) of read sites
+#define LIVE_DEBOUNCE 6
+#define LIVE_MAX_SPECIFIC 8         // more live keys than this: not specific, the profile leads
 
-#define PALETTE_EXTRA 2           // Enter (home) and Keyboard
-static int palette_count(void) { return profile->npalette + PALETTE_EXTRA; }
+static LiveSet live_cand, live;     // candidate and shown sets
+static int live_stable;
+static int live_on;                 // live has something specific to show
+// The moment's remaps: 0 = the usual key
+static int live_left, live_right, live_a, live_b;
+static uint8_t live_list[24];       // live non-button keys, in profile order
+static int live_n;
+static int kb_auto, kb_dismissed;   // the keyboard was opened by a text field / closed by hand
+
+static int is_button_key(int k) { return k == LK_ENTER || k == LK_ESC || (k >= LK_UP && k <= LK_LEFT); }
+
+static const char* key_label(int code) {
+    if (code == 'y') return "Yes";
+    if (code == 'n') return "No";
+    for (int i = 0; i < profile->npalette; i++)
+        if (profile->palette[i].code == code && profile->palette[i].label) return profile->palette[i].label;
+    for (int d = 0; d < 4; d++)
+        if (profile->chord[d].code == code && profile->chord[d].label) return profile->chord[d].label;
+    return key_name(code);
+}
+
+static int same_set(const LiveSet* a, const LiveSet* b) {
+    return a->text == b->text && a->open == b->open && !memcmp(a->keys, b->keys, sizeof a->keys);
+}
+
+static void open_keyboard(int open);
+
+static void palette_build(void);
+static int palette_code(int i);
+static uint8_t pal_codes[64];
+static const char* pal_labels[64];
+static int pal_n, live_shown;
+
+static void live_apply_(void);
+static void live_apply(void) {
+    int keep = palette_sel ? palette_code(palette_sel) : 0;
+    live_apply_();
+    palette_build();
+    palette_sel = 0;
+    for (int i = 1; keep > 0 && i <= pal_n; i++)
+        if (pal_codes[i - 1] == keep) palette_sel = i;
+}
+
+static void live_apply_(void) {
+    live_left = live_right = live_a = live_b = 0;
+    live_n = 0;
+    live_on = 0;
+    if (!settings.live_keys || !live.known || live.text) return;
+    // live non-button keys: profile palette order first, then by code (y before n)
+    uint8_t seen[128] = {0};
+    for (int i = 0; i < profile->npalette && live_n < 24; i++) {
+        int c = profile->palette[i].code;
+        if (c < 128 && live.keys[c] && !is_button_key(c) && !seen[c]) live_list[live_n++] = (uint8_t)c, seen[c] = 1;
+    }
+    if (live.keys['y'] && !seen['y'] && live_n < 24) live_list[live_n++] = 'y', seen['y'] = 1;
+    for (int c = 1; c < 128 && live_n < 24; c++)
+        if (live.keys[c] && !is_button_key(c) && !seen[c]) live_list[live_n++] = (uint8_t)c, seen[c] = 1;
+    if (live_n == 0 || live_n > LIVE_MAX_SPECIFIC) {
+        live_n = live_n > LIVE_MAX_SPECIFIC ? 0 : live_n;
+        return;
+    }
+    live_on = 1;
+    if (live_n > 2 || live.open) return;
+    // A Yes/No prompt that doesn't read arrows: Yes and No on the D-pad (and on A and B
+    // when the game doesn't read Enter and Esc). Other small sets only lead the palette:
+    // remapping buttons on a guess could take a key away from the game.
+    int dpad_free = !live.arrows && !(profile->dpad[0] || profile->dpad[1] || profile->dpad[2] || profile->dpad[3]);
+    if (dpad_free && live_n == 2 && live_list[0] == 'y' && live_list[1] == 'n') live_left = 'y', live_right = 'n';
+    // A and B only take Yes and No: a screen that waits for any key and checks one secret
+    // letter would otherwise turn A into that letter
+    int yes = live_list[0] == 'y', no = live_n == 2 ? live_list[1] == 'n' : live_list[0] == 'n';
+    if (yes && !live.keys[LK_ENTER] && !profile->a_key.code) live_a = 'y';
+    if (no && !live.keys[LK_ESC]) live_b = 'n';
+}
+
+// After each batch of VM frames.
+static void live_update(int frames) {
+    if (!frames) return;
+    LiveSet s;
+    live_compute(vm, LIVE_WINDOW, &s);
+    if (same_set(&s, &live_cand)) live_stable += frames;
+    else live_cand = s, live_stable = frames;
+    if (live_stable < LIVE_DEBOUNCE || same_set(&live_cand, &live)) return;
+    int was_text = live.text;
+    live = live_cand;
+    live_apply();
+    chrome_dirty = 1;
+    // the keyboard panel follows text fields
+    if (live.text && !was_text) {
+        if (settings.auto_kb && !keyboard_open && !kb_dismissed) {
+            open_keyboard(1);
+            kb_auto = 1;
+        }
+    } else if (!live.text && was_text) {
+        if (kb_auto && keyboard_open) open_keyboard(0);
+        kb_auto = 0;
+        kb_dismissed = 0;
+    }
+}
+
+static void live_reset(void) {
+    memset(&live, 0, sizeof live);
+    memset(&live_cand, 0, sizeof live_cand);
+    live_stable = 0;
+    kb_auto = kb_dismissed = 0;
+    live_apply();
+}
+
+static int a_key(void) {
+    if (live_a) return live_a;
+    return profile->a_key.code ? profile->a_key.code : LK_ENTER;
+}
+
+// The palette: Ⓐ's key (home), the keys the game reads now, the profile's keys, Keyboard.
+static void palette_build(void) {
+    int n = 0;
+    uint8_t used[128] = {0};
+    int home = a_key();
+    if (home < 128) used[home] = 1;
+    for (int i = 0; i < live_n && n < 60; i++) {
+        int c = live_list[i];
+        if (used[c]) continue;
+        pal_codes[n] = (uint8_t)c, pal_labels[n] = key_label(c), used[c] = 1, n++;
+    }
+    live_shown = n;
+    for (int i = 0; i < profile->npalette && n < 60; i++) {
+        int c = profile->palette[i].code;
+        if (c < 128 && used[c]) continue;
+        pal_codes[n] = (uint8_t)c;
+        pal_labels[n] = profile->palette[i].label ? profile->palette[i].label : key_name(c);
+        used[c] = 1, n++;
+    }
+    pal_n = n;
+}
+
+#define PALETTE_EXTRA 2           // Ⓐ's key (home) and Keyboard
+static int palette_count(void) { return pal_n + PALETTE_EXTRA; }
 static int palette_code(int i) {
     if (i == 0) return a_key();
-    if (i <= profile->npalette) return profile->palette[i - 1].code;
+    if (i <= pal_n) return pal_codes[i - 1];
     return -1;     // Keyboard
 }
+static int palette_is_live(int i) { return i >= 1 && i <= live_shown; }
 static const char* palette_label(int i) {
-    if (i == 0) return profile->a_key.code ? (profile->a_key.label ? profile->a_key.label : key_name(a_key())) : "Enter";
-    if (i <= profile->npalette) {
-        const char* l = profile->palette[i - 1].label;
-        return l ? l : key_name(profile->palette[i - 1].code);
+    if (i == 0) {
+        if (live_a) return key_label(live_a);
+        return profile->a_key.code ? (profile->a_key.label ? profile->a_key.label : key_name(a_key())) : "Enter";
     }
+    if (i <= pal_n) return pal_labels[i - 1];
     return "Keyboard";
 }
 
@@ -881,6 +1043,12 @@ static void draw_top_band(void) {
         if (!n) snprintf(t, sizeof t, "Release B for Esc");
     } else if (toast_frames > 0) {
         snprintf(t, sizeof t, "%s", toast_text);
+    } else if (live_left || live_a || live_b) {
+        // the moment's remaps: "⬅️ Yes   No ➡️    Ⓐ Yes  Ⓑ No"
+        int n = 0;
+        if (live_left) n += snprintf(t + n, sizeof t - n, "⬅️ %s   %s ➡️", key_label(live_left), key_label(live_right));
+        if (live_a) n += snprintf(t + n, sizeof t - n, "%sⒶ %s", n ? "      " : "", key_label(live_a));
+        if (live_b) n += snprintf(t + n, sizeof t - n, "   Ⓑ %s", key_label(live_b));
     } else if (settings.show_perf) {
         // VM time per 1/60 s frame (and its share of that 16.7 ms), ops per frame, draw time, fps;
         // bench = average VM cost of frames 300-599 since the game started.
@@ -936,6 +1104,8 @@ static void draw_palette(void) {
         LCDColor fg = inv_bg ? kColorWhite : kColorBlack, bgc = inv_bg ? kColorBlack : kColorWhite;
         pd->graphics->fillRoundRect(x, y, cw, h, 5, sel ? fg : bgc);
         if (!sel) pd->graphics->drawRoundRect(x, y, cw, h, 5, 1, fg);
+        // a dot marks the keys the game is reading right now
+        if (palette_is_live(i)) pd->graphics->fillEllipse(x + 4, y + 4, 5, 5, 0.0f, 0.0f, sel ? bgc : fg);
         if (sel != inv_bg) pd->graphics->setDrawMode(kDrawModeFillWhite);
         pd->graphics->setClipRect(x + 2, y, cw - 4, h);
         const char* kn = code == LK_ENTER ? "Ⓐ" : code > 0 ? key_name(code) : "every key";
@@ -1073,6 +1243,7 @@ static void start_game(const Entry* e) {
     snprintf(path, sizeof path, "Config/%s.txt", e->folder);
     read_kv(path, apply_config, NULL);
     lava_set_pace(vm, (uint32_t)game_pace);
+    live_reset();
 
     release_all_keys();
     palette_open = !pd->system->isCrankDocked();
@@ -1121,6 +1292,7 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
             const KbKey* k = &kb[kb_row][kb_col];
             if (!k->code) {
                 open_keyboard(0);
+                if (live.text) kb_dismissed = 1;
                 return;
             }
             kb_pressed = k->code;
@@ -1130,7 +1302,10 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
             key_release(kb_pressed);
             kb_pressed = 0;
         }
-        if (pushed & kButtonB) open_keyboard(0);
+        if (pushed & kButtonB) {
+            open_keyboard(0);
+            if (live.text) kb_dismissed = 1;    // stays closed until the next text field
+        }
         return;
     }
 
@@ -1143,6 +1318,8 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
     for (int d = 0; d < 4; d++) {
         if (pushed & dirs[d]) {
             int code = dpad_key(d);
+            if (d == 3 && live_left) code = live_left;
+            if (d == 1 && live_right) code = live_right;
             if (b_down && profile->chord[d].code) {
                 code = profile->chord[d].code;
                 b_chorded = 1;
@@ -1159,8 +1336,9 @@ static void handle_buttons(PDButtons cur, PDButtons pushed, PDButtons released) 
     }
     if (released & kButtonB) {
         if (b_down && !b_chorded) {
-            key_press(LK_ESC);
-            key_release(LK_ESC);
+            int code = live_b ? live_b : LK_ESC;
+            key_press(code);
+            key_release(code);
         }
         b_down = 0;
         chrome_dirty = 1;
@@ -1296,6 +1474,7 @@ static void game_update(void) {
     }
     frames = ran;
     float spent = (pd->system->getElapsedTime() - t0) * 1000.0f;
+    live_update(frames);
     if (frames > 0) {
         if (game_frames >= 300 && game_frames + frames <= 600) bench_ms += spent;
         game_frames += frames;
@@ -1345,12 +1524,12 @@ static void game_update(void) {
 
 // MARK: Options
 
-enum { OPT_SAVE, OPT_LOAD, OPT_SLOT, OPT_BORDER, OPT_SPEED, OPT_PACE, OPT_GREY, OPT_PERF, OPT_KEYS, OPT_RESET, OPT_QUIT,
-       OPT_COUNT };
+enum { OPT_SAVE, OPT_LOAD, OPT_SLOT, OPT_BORDER, OPT_SPEED, OPT_PACE, OPT_GREY, OPT_LIVE, OPT_AUTOKB, OPT_PERF, OPT_KEYS,
+       OPT_RESET, OPT_QUIT, OPT_COUNT };
 
 // Machine paces (us per op): lavaemu MACHINE_US_PER_OP, Worms' TC800 figure, and a PC emulator's
 static const int paces[] = {4, 19, 27, 57, 75};
-static const char* const pace_names[] = {"PC emulator", "TC800", "NC3000/TC1000", "NC2600", "NC1020"};
+static const char* const pace_names[] = {"PC emulator", "TC800", "NC3000", "NC2600", "NC1020"};
 static int opt_selected;
 
 static void option_label(int i, char* out, size_t cap) {
@@ -1362,6 +1541,8 @@ static void option_label(int i, char* out, size_t cap) {
     case OPT_BORDER: snprintf(out, cap, "Border\t%s", border_names[settings.border]); break;
     case OPT_SPEED: snprintf(out, cap, "Speed\t%dx", settings.speed); break;
     case OPT_PERF: snprintf(out, cap, "Show performance\t%s", settings.show_perf ? "On" : "Off"); break;
+    case OPT_LIVE: snprintf(out, cap, "Live key hints\t%s", settings.live_keys ? "On" : "Off"); break;
+    case OPT_AUTOKB: snprintf(out, cap, "Auto keyboard\t%s", settings.auto_kb ? "On" : "Off"); break;
     case OPT_PACE: {
         const char* nm = "custom";
         for (int k = 0; k < 5; k++)
@@ -1384,7 +1565,7 @@ static void options_draw(void) {
     pd->graphics->clear(kColorWhite);
     text(font, game.title, 12, 8);
     pd->graphics->drawLine(12, 30, 388, 30, 1, kColorBlack);
-    int row_h = 18, y0 = 36;
+    int row_h = 15, y0 = 34;
     for (int i = 0; i < OPT_COUNT; i++) {
         char label[96];
         option_label(i, label, sizeof label);
@@ -1395,11 +1576,11 @@ static void options_draw(void) {
             pd->graphics->fillRect(8, y - 1, 384, row_h, kColorBlack);
             pd->graphics->setDrawMode(kDrawModeFillWhite);
         }
-        text(font, label, 16, y + 2);
+        text(small_font, label, 16, y + 1);
         if (value) {
             char shown_v[48];
             snprintf(shown_v, sizeof shown_v, "< %s >", value);
-            text(font, shown_v, 384 - text_w(font, shown_v), y + 2);
+            text(small_font, shown_v, 384 - text_w(small_font, shown_v), y + 1);
         }
         pd->graphics->setDrawMode(kDrawModeCopy);
     }
@@ -1455,12 +1636,22 @@ static void options_update(void) {
             settings.show_perf = !settings.show_perf;
             save_settings();
             break;
+        case OPT_LIVE:
+            settings.live_keys = !settings.live_keys;
+            save_settings();
+            live_apply();
+            break;
+        case OPT_AUTOKB:
+            settings.auto_kb = !settings.auto_kb;
+            save_settings();
+            break;
         case OPT_PACE: {
             int k = 0;
             for (int i = 0; i < 5; i++)
                 if (paces[i] == game_pace) k = i;
             game_pace = paces[(k + dir + 5) % 5];
             lava_set_pace(vm, (uint32_t)game_pace);
+    live_reset();
             save_config();
             break;
         }
@@ -1667,17 +1858,20 @@ static void picker_draw(void) {
         if (i == entry_count) {
             text(font, "Credits and licences", 16, y + 9);
         } else {
+            // line 1: the English title, the whole width; line 2: what it is (left) and the
+            // Chinese title (right), each cut to its own room so they never meet
             Entry* e = &entries[i];
-            text(font, e->title, 16, y + 2);
+            char buf[120];
+            fit_text(font, e->title, 368, buf, sizeof buf);
+            text(font, buf, 16, y + 1);
+            int zw = e->title_gb_len ? e->title_gb_len * 8 : 0;
             char second[100];
             if (e->label[0]) snprintf(second, sizeof second, "%s", e->label);
             else if (!strcmp(e->base, "Games")) snprintf(second, sizeof second, "Games/%s", e->folder);
             else snprintf(second, sizeof second, "%s", strstr(e->folder, "-zh") ? "Chinese original" : "English");
-            text(small_font, second, 16, y + 20);
-            if (e->title_gb_len) {
-                int w = e->title_gb_len * 8;
-                draw_gb(e->title_gb, e->title_gb_len, 384 - w, y + 9, sel);
-            }
+            fit_text(small_font, second, 368 - zw - 12, buf, sizeof buf);
+            text(small_font, buf, 16, y + 20);
+            if (e->title_gb_len) draw_gb(e->title_gb, e->title_gb_len, 384 - zw, y + 18, sel);
         }
         pd->graphics->setDrawMode(kDrawModeCopy);
     }
@@ -1820,9 +2014,10 @@ static const AutotestGame autotest_games[] = {
     {"Hero.lav", "~400 shot:newhero-title ENTER ~300 shot:newhero-2 ENTER ~400 ENTER ~400 ENTER ~400 shot:newhero-4 "
                  "ENTER ~400 ENTER ~400 ENTER ~600 ENTER ~900 ENTER ~900 ENTER ~900 shot:newhero-hero ENTER ~900 "
                  "ENTER ~1200 shot:newhero-map ESC ~120 shot:newhero-status ESC ~60 stats keys:newhero-keys ~10"},
-    {"ShuRegister.lav", "~300 shot:shushan-register ENTER ~120 a ~20 b ~20 c ~20 undock ~4 crank:-1 ~10 "
-                        "shot:shushan-palkb press:A ~2 release:A ~10 shot:shushan-keyboard kb:off dock ENTER ~60 "
-                        "1 ~20 2 ~20 3 ~20 shot:shushan-typed ENTER ~120 y ~120 shot:shushan-registered stats ls"},
+    {"ShuRegister.lav", "~300 shot:shushan-register ENTER ~60 shot:shushan-autokb a ~20 b ~20 c ~20 "
+                        "shot:shushan-keyboard ENTER ~60 1 ~20 2 ~20 3 ~20 shot:shushan-typed ENTER ~120 "
+                        "shot:shushan-yn undock ~4 ~30 shot:shushan-yn-palette dock press:LEFT ~6 release:LEFT ~120 "
+                        "shot:shushan-registered stats ls"},
     {"ShuHeroes.lav", "~400 shot:shushan-title ENTER ~300 a ~20 b ~20 c ~20 ENTER ~60 1 ~20 2 ~20 3 ~20 "
                       "ENTER ~300 shot:shushan-login ENTER ~400 ENTER ~200 ENTER ~200 ENTER ~200 ENTER ~200 ENTER ~200 "
                       "shot:shushan-map press:B ~2 shot:shushan-chords "
@@ -1861,7 +2056,7 @@ static const AutotestGame autotest_games[] = {
     {"SkyLand2.lav", "~300 shot:seal-title perf0 ~600 perf:seal-title ENTER ~120 shot:seal-menu ENTER ~300 shot:seal-intro ENTER ~300 ENTER ~600 "
                      "shot:seal-prompt y ~90 a ~10 b ~10 c ~10 shot:seal-account ENTER ~60 shot:seal-class ENTER ~60 ENTER ~60 ENTER ~400 "
                      "shot:seal-village F1 ~60 shot:seal-f1 ESC ~60 undock ~4 crank:1 ~10 shot:seal-palette dock "
-                     "border:2 ~60 shot:seal-device border:1 overlay:1 ~400 shot:seal-black-perf overlay:0 border:0 ~10 stats "
+                     "border:2 ~60 shot:seal-device border:1 overlay:1 ~400 shot:seal-black-perf overlay:0 border:1 ~10 stats "
                      "opts:seal-options keys:seal-keys ~10"},
 };
 
@@ -1903,7 +2098,7 @@ static void autotest_update(void) {
         pd->file->mkdir("autotest");
         pd->file->unlink("autotest/log.txt", 0);
         settings.show_perf = 0;
-        settings.border = BORDER_WHITE;
+        settings.border = BORDER_BLACK;
         return;
     }
     if (screen == SCREEN_PICKER && !vm) {
@@ -2116,6 +2311,8 @@ int eventHandler(PlaydateAPI* playdate, PDSystemEvent event, uint32_t arg) {
         font = pd->graphics->loadFont("/System/Fonts/Asheville-Sans-14-Bold.pft", &err);
         small_font = pd->graphics->loadFont("/System/Fonts/Roobert-10-Bold.pft", &err);
         if (!small_font) small_font = font;
+        mid_font = pd->graphics->loadFont("/System/Fonts/Roobert-11-Bold.pft", &err);
+        if (!mid_font) mid_font = small_font;
         const char* mk[] = {"Games", "Saves", "States", "Config"};
         for (size_t i = 0; i < sizeof mk / sizeof mk[0]; i++) pd->file->mkdir(mk[i]);
         read_kv("settings.txt", apply_setting, NULL);

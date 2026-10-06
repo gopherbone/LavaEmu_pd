@@ -62,6 +62,7 @@ def lib():
         L.lh_ops.restype = C.c_uint64
         L.lh_ops.argtypes = [vp]
         L.lh_set_pace.argtypes = [vp, C.c_int]
+        L.lh_live.argtypes = [vp, C.c_int, u8p, i32p]
         L.lh_pace.argtypes = [vp]
         L.lh_px_info.argtypes = [vp, i32p]
         L.lh_px_plane.restype = u8p
@@ -103,6 +104,13 @@ class CVM:
 
     def set_pace(self, upo: int) -> None:
         self.L.lh_set_pace(self.h, int(upo))
+
+    def live(self, window: int = 15):
+        """(set of key codes, dict(open, arrows, known, text))."""
+        keys = (C.c_uint8 * 128)()
+        info = (C.c_int32 * 5)()
+        self.L.lh_live(self.h, window, keys, info)
+        return {k for k in range(128) if keys[k]}, dict(open=info[1], arrows=info[2], known=info[3], text=info[4])
 
     def pace(self) -> int:
         return self.L.lh_pace(self.h)

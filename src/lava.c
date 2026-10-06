@@ -964,6 +964,27 @@ static inline void wr8(LavaVM* vm, uint32_t a, int32_t v) { vm->mem[a & 0xFFFF] 
         vm->stack[vm->sp++] = _v;   \
     } while (0)
 
+// Notes a key read site for the frontend's live key hints (UI only).
+static void note_read(LavaVM* vm) {
+    uint32_t pc = vm->pc - 1, fb = vm->fb & 0xFFFF;
+    const uint8_t* m = vm->mem;
+    uint32_t r0 = m[fb] | m[fb + 1] << 8 | m[fb + 2] << 16;
+    uint32_t fb2 = m[fb + 3] | m[fb + 4] << 8;
+    uint32_t r1 = m[fb2] | m[fb2 + 1] << 8 | m[fb2 + 2] << 16;
+    if (r0 >= vm->code_len) r0 = 0;
+    if (r1 >= vm->code_len) r1 = 0;
+    int oldest = 0;
+    for (int i = 0; i < LAVA_READ_SITES; i++) {
+        LavaReadSite* r = &vm->reads[i];
+        if (r->pc == pc && r->ret0 == r0 && r->ret1 == r1) {
+            r->frame = vm->frame;
+            return;
+        }
+        if (r->frame < vm->reads[oldest].frame) oldest = i;
+    }
+    vm->reads[oldest] = (LavaReadSite){pc, r0, r1, vm->frame};
+}
+
 #ifdef LAVA_PROFILE
 uint64_t lava_sys_count[256];
 double lava_sys_time[256];
@@ -1025,6 +1046,7 @@ static int sys_call(LavaVM* vm, int op) {
     case 0x8E: memset(mem + LAVA_GBUF, 0, LAVA_SCREEN_BYTES); break;
     case 0x81:
     case 0xC4: {    // getchar / GetWord(mode)
+        note_read(vm);
         if (!vm->latched) return 1;
         int k = vm->latched;
         vm->latched = 0;
@@ -1040,6 +1062,7 @@ static int sys_call(LavaVM* vm, int op) {
         break;
     }
     case 0x93: {    // Inkey
+        note_read(vm);
         int k = vm->latched;
         vm->latched = 0;
         if (k && k == vm->autorelease) {
@@ -1054,6 +1077,8 @@ static int sys_call(LavaVM* vm, int op) {
         POPN(1);
         int32_t k = A[0];
         if (vm->key_probe) vm->key_probe(vm, 1, k);
+        if (k & ~0x7F) note_read(vm);
+        else vm->checked[k & 0x7F] = vm->frame + 1;
         if (k & ~0x7F) {
             int m = min_held(vm);
             if (m > 0) vm->last_key = m, vm->sys_since_key = 0, vm->seen[m] = 1;
@@ -1220,6 +1245,9 @@ static int sys_call(LavaVM* vm, int op) {
     case 0x9B: case 0x9C: case 0x9D: case 0x9E: case 0x9F: case 0xA0: case 0xA1: case 0xA2: case 0xA3: case 0xA4:
     case 0xA5: case 0xAA: case 0xAB: {
         POPN(1);
+        // isalpha/isdigit/... on a key just read: text entry (toupper/tolower only normalise hotkeys)
+        if (op != 0xAA && op != 0xAB && vm->sys_since_key <= 3 && A[0] == vm->last_key && A[0])
+            vm->classified = vm->frame + 1;
         int c = A[0] & 0xFF;
         int dig = c >= '0' && c <= '9', up = c >= 'A' && c <= 'Z', lo = c >= 'a' && c <= 'z';
         int r = 0;

@@ -9,10 +9,12 @@
 
 static const Profile profiles[] = {
     {"frog", "Frog Monopoly",
-     {K(LK_F2, "Discard card"), K(LK_PGDN, "Next tab"), K('s', "Quick save"), K(LK_PGUP, "Prev tab")},
-     {K(LK_PGDN, "Next tab"), K(LK_PGUP, "Prev tab"), K(LK_F2, "Discard card"), K('y', "Yes"), K('n', "No"),
-      K('a', "Back"), K('s', "Quick save"), K('r', "Quick load"), K('q', "Quit menu"), K(LK_HELP, "Help")},
-     10, "On the map any other key opens the menu. Menus: Next/Prev tab page through cards, info, status."},
+     {K('y', "Yes"), K(LK_PGDN, "Next tab"), K('n', "No"), K(LK_PGUP, "Prev tab")},
+     {K('y', "Yes"), K('n', "No"), K(LK_PGDN, "Next tab"), K(LK_PGUP, "Prev tab"), K(LK_F2, "Discard card"),
+      K('p', "Discard (P)"), K('s', "Quick save"), K('r', "Quick load"), K('q', "Prev tab / Quit"), K('w', "Next tab"), K('a', "Back"),
+      K(LK_HELP, "Help")},
+     12, "Yes/No prompts that don't read arrows put Yes and No on the D-pad. On the map S and R quick-save and "
+         "-load; in the menu PgUp/PgDn page the tabs."},
     {"ace", "Phoenix Wright: Ace Attorney",
      {K('r', "Court Record"), NONE, NONE, NONE},
      {K('r', "Court Record")},
@@ -20,8 +22,8 @@ static const Profile profiles[] = {
     {"newhero", "New Heroes' Altar",
      {K('y', "Yes"), NONE, K('n', "No"), NONE},
      {K('y', "Yes"), K('n', "No"), K('c', "Challenge"), K('k', "Kill"), K('h', "Head off"), K('b', "Body off"),
-      K('d', "Hand off"), K('f', "Feet off"), K('r', "Reset keys")},
-     9, "Esc on the map opens the status and menu pages. Fight mode: C challenge, K kill. Gear page: H B D F take "
+      K('d', "Hand off"), K('f', "Feet off"), K(LK_PGUP, "PgUp"), K(LK_CAPS, "Caps"), K('r', "Reset keys")},
+     11, "Esc on the map opens the status and menu pages. Fight mode: C challenge, K kill. Gear page: H B D F take "
         "off head, body, hand, feet."},
     {"shushan", "Heroes of Mount Shu",
      {K(LK_F1, "Gear"), K(LK_F2, "Items"), K(LK_F3, "Status"), K(LK_F4, "Arts")},
@@ -71,8 +73,9 @@ static const Profile profiles[] = {
      {0, 0, 0, 0}, NONE, 20},
     {"school", "High School Legend",
      {K(LK_HELP, "Menu"), K('y', "Yes"), NONE, NONE},
-     {K(LK_HELP, "Menu"), K('y', "Yes"), K(LK_F2, "Delete"), K(LK_F1, "F1"), K(LK_SPACE, "Space")},
-     5, "Help opens the main menu. Your name: Keyboard (Enter alone gives Qiang)."},
+     {K(LK_HELP, "Menu"), K('y', "Yes"), K(LK_SHIFT, "Shift"), K(LK_F1, "F1"), K(LK_F2, "F2 / Delete"),
+      K(LK_F3, "F3"), K(LK_F4, "F4"), K(LK_SPACE, "Space")},
+     8, "Help opens the main menu. Your name: Keyboard (Enter alone gives Qiang)."},
     {"jianghu", "Jianghu",
      {K(LK_HELP, "Menu"), K('y', "Yes"), K('a', "Run"), NONE},
      {K(LK_HELP, "Menu"), K('y', "Yes"), K('a', "Run"), K(LK_F2, "Delete"), K(LK_SPACE, "Space")},
