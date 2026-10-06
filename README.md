@@ -13,10 +13,12 @@ frontend. The VM is a port of wqx_tl's `lavaemu`, a Python VM from the MIT-licen
 and MyGVM, and it runs in lockstep with lavaemu on every frame of the translations' QA routes
 ([Correctness](#correctness)).
 
-**Status: runs on a Playdate.** All fifteen games booted and played their scripted openings on
-the device at 29–30 fps (see [On the device](#on-the-device)); not yet played through by hand.
+**Status: runs on a Playdate.** The first fifteen games booted and played their scripted openings
+on the device at 29–30 fps (see [On the device](#on-the-device)); not yet played through by hand.
+The nine added since (Magic Tower to Power Ski) pass the lockstep test but haven't been run on the
+device yet.
 
-It comes with fifteen English fan translations from the wqx_tl project, each run at the pace
+It comes with twenty-four English fan translations from the wqx_tl project, each run at the pace
 of the machine it was written for (see [Pace](#pace)):
 
 | Game | Original | Pace | Notes |
@@ -36,6 +38,15 @@ of the machine it was written for (see [Pace](#pace)):
 | **High School Legend** | 中学传奇 1.05, EPC, 2005 | NC3000 | RPG on FantasyDR's engine |
 | **Jianghu** | 江湖 0.30, JPG Studio, 2005 | NC3000 | wuxia RPG |
 | **Worms** | 百战天虫 1.00, Xiao Qiang, 2006 | TC800 | artillery game for LeeSoft's LavaX VM |
+| **Magic Tower** | 魔塔整合版, NIpleX software, 2005 | NC3000 | Tower of the Sorcerer puzzle RPG, 18 floors |
+| **Legend of the Brave** | 勇者传说, Isword (D.M Studio), 2006 | NC3000 | 40 one-screen puzzle levels |
+| **Rush Out the Tunnel** | Anson and Jay, 2005 | NC3000 | one-button cave flyer; written in English, two typos fixed |
+| **Tetris** | 俄罗斯方块 1.3, wqstar028 (SevenStar), 2006 | NC3000 | six modes, up to 34 kinds of piece |
+| **Diamond Blocks** | 钻石方块 1.1, wqstar028 (SevenStar), 2006 | NC3000 | Columns-style match three |
+| **Phantom Fighter** | 幻影战机, Zhao Fei (CV soft), 2007 | NC3000 | side-scrolling shoot-'em-up, five stages |
+| **Magic Blocks** | 魔法方块, Pan Yufei, 2006 | NC3000 | Columns-style, Classic and Extreme |
+| **Billiards Master** | 撞球高手, han_yue, 2005 | NC3000 | pool against the clock, 20 stages |
+| **Power Ski** | 动力滑雪, Tiantian Lantian (BLUE-SKY soft), 2001 | NC3000 | downhill race with jumps and stunts |
 
 | | |
 |---|---|
@@ -70,7 +81,7 @@ credits, and a Chinese original running on the VM's own fonts.
 
 Download `LavaEmu.pdx.zip` from the [latest release](../../releases/latest) and sideload it at
 [play.date/account/sideload](https://play.date/account/sideload/), or unzip it into the `Games`
-folder of the Playdate's data disk. It includes fifteen English translations. They are
+folder of the Playdate's data disk. It includes twenty-four English translations. They are
 **unofficial fan translations**, not made or endorsed by the original authors; any author who
 would like their game removed can open an issue. To build it yourself, see [Building](#building).
 
@@ -137,11 +148,20 @@ What the chords and the palette send in each game (from the key view, Options �
 | High School Legend | Menu (Help), Yes | Menu, Yes, Delete, F1, Space |
 | Jianghu | Menu (Help), Yes, Run | Menu, Yes, Run, Delete, Space |
 | Worms | Jump, Weapon mode, Map, Everyone's HP | Start, Jump, Weapon mode, Game menu, HP, Map; hold Ⓐ to charge |
+| Magic Tower | Fly up, Water of Life, Fly down, Iron Spade | those (PgUp, F2, PgDn, F1), Yes, No |
+| Legend of the Brave | Restart level (F1) | Restart level |
+| Rush Out the Tunnel | –, Bomb (X), Yes, Pause (Z) | Bomb, Pause, Yes, Space, F2 |
+| Tetris, Diamond Blocks | Clock (F1, hold), Yes | Clock, Yes, Delete (F2) |
+| Phantom Fighter | Pause, Enter (choose), Start stage +1 (Z) | Enter, Pause, Start stage +1. **Ⓐ fires (A)**; menus take Enter from the chord |
+| Magic Blocks | Yes (save keys) | Yes |
+| Billiards Master | Enter, Speed settings (P), Yes, No | Enter, Turbo aim (PgUp, hold), Speed, Yes, No, Delete. **Hold Ⓐ to charge a shot (Space)** |
+| Power Ski | Stunts Q, W, E, A | Stunts Q W E A S D, Status (Help) |
 | any other game | F1–F4 | every key its code compares a key against |
 
 Each palette also has Ⓐ's key (Enter; where it rests) and Keyboard (every key) at its ends.
 Names and passwords (Mount Shu, both Sky & Lands, Mario's records, High School Legend,
-Jianghu's diary) are typed on the keyboard.
+Jianghu's diary, the high-score names of Tetris, Diamond Blocks, Magic Blocks and Billiards
+Master) are typed on the keyboard.
 
 A tapped key stays down until the game has seen it (read it, or found it held when it polled),
 for at most half a second, so quick taps aren't lost while a game is busy and aren't read
@@ -349,7 +369,7 @@ Heroes' Altar).
 paced one: play, save, play on, load into a fresh VM, replay, compare every frame) and
 `tests/lockstep.py`, the lockstep test:
 
-- It drives all fifteen games' own QA routes from wqx_tl (`docs/<game>/routes/`, through each
+- It drives all twenty-four games' own QA routes from wqx_tl (`docs/<game>/routes/`, through each
   game's `qa.py`, at the pace each QA uses), on the English build **and** the Chinese original.
   `--pace 27` reruns them all at the NC3000's pace.
 - Every frame lavaemu runs, the C VM (`host/liblava.dylib` through ctypes) runs the same frame,
@@ -360,10 +380,13 @@ paced one: play, save, play on, load into a fresh VM, replay, compare every fram
   Python callback changes the VM inside a frame (Mount Shu's driver releases keys mid-frame)
   the frame is counted as "tainted" and skipped instead.
 
-Result: **0 divergences** in about 1.1 million frames at the QA paces (Sanguo 335k, Sky & Land II
+Result: **0 divergences** in about 1.2 million frames at the QA paces (Sanguo 335k, Sky & Land II
 164k, Mount Shu 122k, New Heroes 117k, Ace 99k, Worms 48k, Sky & Land 45k, Fujia 34k, Pokemon
-31k, Mario 29k, School 26k, WarCraft 20k, Jianghu 17k, Snowman 8k, Frog 6k) and 1.2 million more
-at 27 µs/op, with 0.25% of frames tainted. One Worms route is excluded by design: it patches
+31k, Mario 29k, School 26k, Legend of the Brave 22k, Phantom Fighter 21k, WarCraft 20k, Tetris
+18k, Jianghu 17k, Diamond Blocks 13k, Billiards Master 12k, Rush Out 10k, Magic Blocks 8k,
+Snowman 8k, Magic Tower 8k, Frog 6k, Power Ski 5k) and 1.3 million more at 27 µs/op, with 0.23%
+of frames tainted. Legend of the Brave and Rush Out run their routes at both 4 and 27 µs/op, as
+their QA does; Magic Tower and Phantom Fighter's QA runs at 4 and the other new games' at 27. One Worms route is excluded by design: it patches
 lavaemu's SetGraphMode to fail, to show the game's "needs LavaX 2.0" error. The harness itself
 was checked by breaking the C VM on purpose (a different rand() increment, a short ClearScreen):
 it reported 1,224 divergent frames on two Frog routes. Divergent frames are saved with the state
@@ -374,6 +397,11 @@ The port mirrors lavaemu down to its Python integer semantics: which addresses a
 string-literal ring, signed division, and the virtual-time accounting around system calls.
 Known edges where it doesn't: values outside 32 bits (a `>> 0` on a negative number, `INT_MIN
 / -1`) and memory slices running off the end of the 64 KB space, which Python grows and C clamps.
+
+Power Ski draws its course markers as the character `FB E3`, a symbol from the Wenquxing's own
+font outside GB2312. GVmakerSE's font (the one bundled here, byte for byte lavaemu's) ends at row
+0xF7, so the glyph comes out blank on the Playdate as in lavaemu and the markers don't show. Play
+is unaffected: falls are decided by position, not pixels.
 
 ## Building
 
@@ -429,8 +457,15 @@ automatic one.
   富甲天下 by You Shunhang (游顺航), Hang'Studio; 三国志 by Bsxy and Lee (LeeSoft), art by Mumu
   and NBADong; 雪人传奇 by Xu Jiajun (徐佳骏); 魔兽争霸 by Fanqinlue and Shaofan Daotong
   (烧饭道童); 口袋 (灰度版) by an unnamed author; 中学传奇 by EPC on FantasyDR's engine; 江湖 by
-  JPG Studio (FantasyDR, gameboyLV, pheagle, CreamCake); 百战天虫 by Xiao Qiang (小强).
-  Pokémon, WarCraft, Worms and Mario are trademarks of Nintendo, Blizzard, Team17 and Nintendo.
+  JPG Studio (FantasyDR, gameboyLV, pheagle, CreamCake); 百战天虫 by Xiao Qiang (小强);
+  魔塔整合版 by NIpleX software; 勇者传说 by Isword (D.M Studio), with thanks to Wuyan Demeng
+  (无言的梦) and Song Fei (宋飞); Rush Out the Tunnel by Anson (design) and Jay (program),
+  www.emsky.net; 俄罗斯方块 and 钻石方块 by wqstar028 (Xue Shunjian, 薛顺健), SevenStar
+  (世雯星工作室); 幻影战机 by Zhao Fei (赵飞), CV soft, tested by Yan Zheng (闫政); 魔法方块 by
+  Pan Yufei (潘宇飞), tested by Guogai (锅盖); 撞球高手 by han_yue; 动力滑雪 by Tiantian Lantian
+  (天天蓝天), BLUE-SKY soft, tested by Haikuo Tiankong (海阔天空) and Xingxingzhe (星行者).
+  Pokémon, WarCraft, Worms and Mario are trademarks of Nintendo, Blizzard, Team17 and Nintendo;
+  Tetris of The Tetris Company.
 - **LavaX**: LeeSoft's LavaX VM (leesoft-mirage/LavaXVM, MIT, (c) 2015 李杰) decides the LavaX
   ops, calls and drawing, by way of lavaemu.
 - **The English translations**: the wqx_tl project. Their text is drawn in **bbk_tl Sans**, the

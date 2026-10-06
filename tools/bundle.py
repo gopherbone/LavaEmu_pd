@@ -75,6 +75,34 @@ GAMES = [
      [("Worms.lav", "Worms.lav", "")],
      "version 1.00, 2006, by Xiao Qiang (a LavaX game for the TC800). Worms is a Team17 trademark.",
      {"pace": 19, "data": "games/lava/survey/百战天虫/LavaData"}),
+    ("mota", "MagicTower", "Magic Tower", "魔塔",
+     [("MagicTower.lav", "MagicTower.lav", "")],
+     "the combined edition, (c) 2005 NIpleX software: a port of the Tower of the Sorcerer.", {"pace": 27}),
+    ("yongzhe", "LegendOfTheBrave", "Legend of the Brave", "勇者传说",
+     [("Lava/Brave.lav", "Brave.lav", "")],
+     "by Isword (D.M Studio), 2006; thanks to Wuyan Demeng and Song Fei.", {"pace": 27}),
+    ("rushout", "RushOut", "Rush Out the Tunnel", "",
+     [("Lava/Rush_Out.lav", "Rush_Out.lav", "")],
+     "design by Anson, program by Jay, 2005, www.emsky.net (in English; two typos fixed).", {"pace": 27}),
+    ("tetris", "Tetris", "Tetris", "俄罗斯方块",
+     [("Tetris.lav", "Tetris.lav", "")],
+     "version 1.3, (c) 2006 wqstar028 (Xue Shunjian), SevenStar. Tetris is a trademark of The Tetris Company.",
+     {"pace": 27}),
+    ("zuanshi", "DiamondBlocks", "Diamond Blocks", "钻石方块",
+     [("DiamondBlocks.lav", "DiamondBlocks.lav", "")],
+     "version 1.1, (c) 2006 wqstar028 (Xue Shunjian), SevenStar.", {"pace": 27}),
+    ("huanying", "PhantomFighter", "Phantom Fighter", "幻影战机",
+     [("PhantomFighter.lav", "PhantomFighter.lav", "")],
+     "(c) 2007 Zhao Fei, CV soft; testing by Yan Zheng.", {"pace": 27}),
+    ("mofa", "MagicBlocks", "Magic Blocks", "魔法方块",
+     [("MagicBlocks.lav", "MagicBlocks.lav", "")],
+     "(c) 2006 Pan Yufei, tested by Guogai.", {"pace": 27}),
+    ("zhuangqiu", "BilliardsMaster", "Billiards Master", "撞球高手",
+     [("Lava/BilliardsMaster.lav", "BilliardsMaster.lav", "")],
+     "(c) 2005 han_yue.", {"pace": 27}),
+    ("huaxue", "PowerSki", "Power Ski", "动力滑雪",
+     [("Lava/PowerSki.lav", "PowerSki.lav", "")],
+     "(c) 2001 Tiantian Lantian, BLUE-SKY soft; tested by Haikuo Tiankong and Xingxingzhe.", {"pace": 27}),
 ]
 
 # The Chinese originals: key -> (folder in games/lava, [(program, label)], data files)
@@ -107,7 +135,7 @@ def bundle_english(wqx: str, out: str) -> None:
         dst = os.path.join(out, folder)
         shutil.rmtree(dst, ignore_errors=True)
         os.makedirs(os.path.join(dst, "LavaData"))
-        fields = [("title", title), ("title_gb", gb_hex(zh)), ("profile", key)]
+        fields = [("title", title)] + ([("title_gb", gb_hex(zh))] if zh else []) + [("profile", key)]
         for i, (rel, name, label) in enumerate(programs):
             shutil.copy(os.path.join(src, rel), os.path.join(dst, name))
             fields.append(("program", f"{name}|{label}" if label else name))

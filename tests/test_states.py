@@ -46,7 +46,8 @@ def run(vm, events, start, end, lcds=None):
 
 def main():
     ok = True
-    for folder in ("FrogMonopoly", "SkyLand2", "NewHeroesAltar", "AceAttorney", "Worms", "PocketMonsters", "MarioPipes"):
+    for folder in ("FrogMonopoly", "SkyLand2", "NewHeroesAltar", "AceAttorney", "Worms", "PocketMonsters", "MarioPipes",
+                   "PowerSki", "PhantomFighter", "BilliardsMaster"):
         if not os.path.isdir(os.path.join(GAMES, folder)):
             print(f"skip {folder} (make games)")
             continue

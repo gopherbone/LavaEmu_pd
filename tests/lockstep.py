@@ -197,7 +197,8 @@ def route_names(game):
 
 
 GAMES = ["frog", "ace", "newhero", "shushan", "seal", "skyland", "mario", "fujia", "sanguo", "snowman", "warcraft",
-         "pokemon", "school", "jianghu", "worms"]
+         "pokemon", "school", "jianghu", "worms", "mota", "yongzhe", "rushout", "tetris", "zuanshi", "huanying",
+         "mofa", "zhuangqiu", "huaxue"]
 
 
 NAMES = {13: "Enter", 14: "PgDn", 18: "Caps", 19: "PgUp", 20: "Up", 21: "Down", 22: "Right", 23: "Left", 25: "Help",
@@ -280,6 +281,25 @@ def run_game(game, only=None):
         from school import routes as sr
         for mode in ("zh", "en"):
             yield f"{game} tour {mode}", (lambda mode=mode: sr.tour(qa.Run(mode=mode)))
+    elif game in ("yongzhe", "rushout"):
+        # their QA runs every route at a PC emulator's pace and at an NC3000's
+        codes = {"zh": importlib.import_module(f"{game}.game").load(),
+                 "en": importlib.import_module(f"{game}.build").build()}
+        for tag, upo in (("pc", lvm.US_PER_OP), ("nc3000", lvm.MACHINE_US_PER_OP["nc3000"])):
+            for n in only or route_names(game):
+                yield f"{game} {n} {tag}", (lambda n=n, tag=tag, upo=upo: qa.run_route(n, codes, upo, tag))
+    elif game in ("tetris", "zuanshi"):
+        from tetris import engine
+        pf = importlib.import_module(f"{game}.game").PROFILE
+        codes = {"zh": pf.load(), "en": engine.build(pf, "en")}
+        for n in only or route_names(game):
+            yield f"{game} {n}", (lambda n=n: engine.run_route(pf, n, codes, scratch(game)))
+    elif game in ("mota", "huanying", "mofa", "zhuangqiu", "huaxue"):
+        build = importlib.import_module(f"{game}.build")
+        zh = build.build("fixed") if game == "huaxue" else importlib.import_module(f"{game}.game").load()
+        codes = {"zh": zh, "en": build.build()}
+        for n in only or route_names(game):
+            yield f"{game} {n}", (lambda n=n: qa.run_route(n, codes))
     else:
         for n in only or route_names(game):
             yield f"{game} {n}", (lambda n=n: qa.run_route(n))

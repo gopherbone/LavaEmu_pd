@@ -1,6 +1,6 @@
 name=LavaEmu
 author=gopherbone
-description=Wenquxing LAVA (GVmaker) game player, with fifteen unofficial English fan translations
+description=Wenquxing LAVA (GVmaker) game player, with twenty-four unofficial English fan translations
 bundleID=com.gopherbone.lavaemu
 version=0.1.0
 buildNumber=1
