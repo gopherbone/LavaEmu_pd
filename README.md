@@ -64,9 +64,11 @@ credits, and a Chinese original running on the VM's own fonts.
 
 ## Install
 
-There is no release yet. Build it (see [Building](#building)), then copy `LavaEmu.pdx` to the
-Playdate: sideload it at [play.date/account/sideload](https://play.date/account/sideload/) as a
-zip, or put it in the `Games` folder of the Playdate's data disk.
+Download `LavaEmu.pdx.zip` from the [latest release](../../releases/latest) and sideload it at
+[play.date/account/sideload](https://play.date/account/sideload/), or unzip it into the `Games`
+folder of the Playdate's data disk. It includes fifteen English translations. They are
+**unofficial fan translations**, not made or endorsed by the original authors; any author who
+would like their game removed can open an issue. To build it yourself, see [Building](#building).
 
 To add games, run LavaEmu once so it creates its folders, then reboot the Playdate to its data
 disk (Settings → System → Reboot to Data Disk) and open the folder in `Data/` ending in
