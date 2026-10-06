@@ -29,6 +29,7 @@ static int is_read(int op) { return op == 0x81 || op == 0x93 || op == 0xC4 || op
 // comparisons on one variable (or on the value the read pushed). Returns 1 if
 // it found any.
 static int rmin, rmax;      // range-test bounds over letters/digits seen in this computation
+static int looped;          // the last scan hit a jump back to just before its read: a retry loop
 
 static int scan(LavaVM* vm, uint32_t pc, LiveSet* out) {
     const uint8_t* code = vm->code;
@@ -37,11 +38,19 @@ static int scan(LavaVM* vm, uint32_t pc, LiveSet* out) {
     int prev_op = -1, prev_arg = 0;     // the instruction before
     int pprev_op = -1, pprev_arg = 0;
     int found = 0, direct = 1;          // direct: still right after the read (value on the stack)
+    uint32_t start = pc;
+    looped = 0;
     for (int n = 0; n < 400 && pc < len; n++) {
         int op = code[pc];
         if (!(op <= 0x74 || (op >= 0x80 && op <= 0xD6))) break;
         if (op == 0x3E || op == 0x40) break;                // next function / end
         if (n > 0 && is_read(op)) break;                    // the next key read
+        // jmp back to just before the read: a loop that asks again until it gets a key it
+        // wants ("Y or N?"), so the keys it leaves with are all tested here
+        if (op == 0x3B && pc + 4 <= len) {
+            uint32_t t = code[pc + 1] | code[pc + 2] << 8 | code[pc + 3] << 16;
+            if (t < start && t + 32 >= start) looped = 1;
+        }
         int arg = 0;
         uint32_t size;
         if (op == 0x0D) {
@@ -107,7 +116,23 @@ void live_compute(LavaVM* vm, int window, LiveSet* out) {
         // the read itself, then the caller that gets the key back, then its caller
         // all three levels: a helper often tests a few keys and returns the rest (the arrows,
         // say) to its caller
-        int f = scan(vm, r->pc, out);
+        // a Yes/No retry loop (tests Y, N and maybe other letters, jumps back to ask again)
+        // returns only once it has one of them: what its callers compare afterwards is a
+        // different variable (the menu around the prompt). Other loops often leave on any
+        // other key for the caller to handle (Jianghu's Y loop leaves on Enter), so those
+        // still scan the callers.
+        LiveSet site;
+        memset(&site, 0, sizeof site);
+        int f = scan(vm, r->pc, &site), letters = f && looped;
+        for (int k = 1; k < 128; k++) {
+            if (!site.keys[k]) continue;
+            if (!((k >= 'a' && k <= 'z') || (k >= '0' && k <= '9'))) letters = 0;
+            if (!out->keys[k]) out->keys[k] = 1, out->count++;
+        }
+        if (letters && site.keys['y'] && site.keys['n']) {
+            out->known = 1;
+            continue;
+        }
         if (r->ret0) f |= scan(vm, r->ret0, out);
         if (r->ret1) f |= scan(vm, r->ret1, out);
         out->known |= f;
